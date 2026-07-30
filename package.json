@@ -1,0 +1,59 @@
+{
+  "name": "@kud/pcloud-ink",
+  "version": "0.1.0",
+  "description": "Ink components for rendering pCloud domain objects — file lists, change history, account panels",
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "pcloud",
+    "ink",
+    "tui",
+    "cli"
+  ],
+  "author": "kud",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kud/pcloud-ink"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@kud/ink-ui": "0.10.1",
+    "@kud/pcloud-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "ink": ">=7",
+    "react": ">=19"
+  },
+  "devDependencies": {
+    "@types/node": "25.6.0",
+    "@types/react": "19.2.14",
+    "ink": "7.1.0",
+    "ink-testing-library": "4.0.0",
+    "react": "19.2.7",
+    "tsup": "8.5.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}
