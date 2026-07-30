@@ -40,7 +40,7 @@
   },
   "dependencies": {
     "@kud/ink-ui": "0.10.1",
-    "@kud/pcloud-sdk": "0.1.0"
+    "@kud/pcloud": "0.1.1"
   },
   "peerDependencies": {
     "ink": ">=7",

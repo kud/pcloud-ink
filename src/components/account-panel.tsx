@@ -1,7 +1,7 @@
 import React from "react"
 import { Box } from "ink"
 import { KeyValue, Panel, ProgressBar } from "@kud/ink-ui"
-import { formatBytes, type PCloudUserInfo } from "@kud/pcloud-sdk"
+import { formatBytes, type PCloudUserInfo } from "@kud/pcloud"
 
 export type AccountPanelProps = {
   user: PCloudUserInfo

@@ -2,7 +2,7 @@
 // objects. Every component is presentation-only: props in, no data fetching, no
 // app-level input. The consuming surface owns selection, navigation and loading,
 // so these compose into a full-screen CLI or a single pane in a larger dashboard
-// alike. Built on @kud/ink-ui primitives; fed by @kud/pcloud-sdk types +
+// alike. Built on @kud/ink-ui primitives; fed by @kud/pcloud types +
 // formatters.
 export {
   ChangesList,

@@ -1,7 +1,7 @@
 import React from "react"
 import { Box, Text } from "ink"
 import { SelectableRow, colors } from "@kud/ink-ui"
-import { formatTimestamp, type PCloudDiffEntry } from "@kud/pcloud-sdk"
+import { formatTimestamp, type PCloudDiffEntry } from "@kud/pcloud"
 import { eventTone, isFolderEvent } from "../lib/event.js"
 import { windowSlice } from "../lib/window.js"
 

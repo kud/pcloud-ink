@@ -5,7 +5,7 @@ import {
   formatBytes,
   formatTimestamp,
   type PCloudFolderItem,
-} from "@kud/pcloud-sdk"
+} from "@kud/pcloud"
 import { windowSlice } from "../lib/window.js"
 
 export type FileListProps = {
