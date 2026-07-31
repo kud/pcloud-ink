@@ -855,6 +855,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       return [
         {
           label: `Restore "${selected.name}"`,
+          detail: "Puts it back where it was before it was deleted.",
           run: () => restoreTrashItem(trashed),
         },
       ]
@@ -901,7 +902,11 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
 
     const actions: ItemAction[] = []
     if (selected.isfolder) {
-      actions.push({ label: "Open folder", run: enterSelected })
+      actions.push({
+        label: "Open folder",
+        detail: "Descends into it — the same as the right arrow.",
+        run: enterSelected,
+      })
     } else if (selected.fileid !== undefined) {
       const id = selected.fileid
       actions.push({
@@ -1144,9 +1149,13 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   // action modal's label and hint onto the same row. Every overlay is a
   // sibling of the list, so the list has to give up its rows first.
   const CHROME_ROWS = 8
+  // marginTop 1 + two border rows + one description slot + one hint row. The
+  // description slot is always drawn, even empty, so this stays independent of
+  // which option the cursor is on.
+  const ACTION_MODAL_CHROME = 5
   const overlayRows =
     phase === "actions"
-      ? actionsFor().length + 4 + (actionsFor()[actionCursor]?.detail ? 1 : 0)
+      ? actionsFor().length + ACTION_MODAL_CHROME
       : phase === "confirming"
         ? 3
         : phase === "result"
@@ -1290,27 +1299,29 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
           borderStyle="round"
           borderColor="cyan"
         >
+          {/* The whole list first, then one description slot for whatever is
+              under the cursor. Interleaving the description after its own row
+              moved every option below it as the cursor travelled, and made the
+              modal's height depend on the selection — so the rows reserved for
+              it were right for one option and short for the next. A fixed slot
+              is both steadier to read and a constant to budget for.
+
+              Truncate rather than wrap for the same reason: a line that
+              silently becomes two puts that constant out by one. */}
           {actionsFor().map((action, i) => (
-            <React.Fragment key={action.label}>
-              {/* Truncate rather than wrap. The rows reserved for this modal
-                  are counted, and a line that silently becomes two puts the
-                  count back out by one — which is how the labels came to be
-                  composited on top of each other. */}
-              <Text
-                bold={i === actionCursor}
-                color={i === actionCursor ? "cyan" : undefined}
-                wrap="truncate-end"
-              >
-                {/* The marker, not the colour, says which row is selected. */}
-                {`${i === actionCursor ? "❯" : " "} ${action.label}`}
-              </Text>
-              {i === actionCursor && action.detail && (
-                <Text dimColor wrap="truncate-end">
-                  {`    ${action.detail}`}
-                </Text>
-              )}
-            </React.Fragment>
+            <Text
+              key={action.label}
+              bold={i === actionCursor}
+              color={i === actionCursor ? "cyan" : undefined}
+              wrap="truncate-end"
+            >
+              {/* The marker, not the colour, says which row is selected. */}
+              {`${i === actionCursor ? "❯" : " "} ${action.label}`}
+            </Text>
           ))}
+          <Text dimColor wrap="truncate-end">
+            {`  ${actionsFor()[actionCursor]?.detail ?? ""}`}
+          </Text>
           <Text color="gray">{"  ↑↓ choose · enter run · esc cancel"}</Text>
         </Box>
       )}
