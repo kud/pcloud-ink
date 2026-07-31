@@ -7,6 +7,8 @@ import Image, { TerminalInfoProvider } from "ink-picture"
 import open from "open"
 import { execFileSync } from "child_process"
 import fs from "fs"
+import os from "os"
+import nodePath from "path"
 import {
   PCloudAPI,
   PCloudFolderItem,
@@ -15,6 +17,7 @@ import {
   resolveStoredAuth,
   planRewind,
   applyRewind,
+  formatTimestamp,
 } from "@kud/pcloud"
 
 type Phase =
@@ -353,8 +356,7 @@ const Preview = ({
   markdownLines?: string[]
   hint?: string
 }) => {
-  const { columns = 80, rows = 24 } = useWindowSize()
-  const panelWidth = Math.max(10, Math.floor(columns * 0.45) - 4)
+  const { rows = 24 } = useWindowSize()
   const imageHeight = Math.max(10, rows - 10)
 
   return (
@@ -370,21 +372,19 @@ const Preview = ({
         <Text color="gray">No selection</Text>
       ) : (
         <>
-          {/* Width and container height are bounds, not a size. Given both
-              props, ink-picture takes a branch that returns the box verbatim
-              and never reads originalAspectRatio, so a landscape screenshot
-              was squeezed into the panel's portrait shape. Width alone lets it
-              derive the height and clamp against the box.
+          {/* No width, no height: ink-picture measures this box and fits the
+              image to it at its own aspect ratio. Passing a size instead means
+              computing the panel's inner width by hand — 45% less borders less
+              padding — and a native-protocol image drawn from a guess that is
+              one column optimistic is painted straight over the border, since
+              it is positioned in pixels rather than laid out in cells.
 
-              Protocol is left to auto-detection rather than pinned to
-              halfBlock: on a terminal with native image support that yields a
-              real image at true aspect, and halfBlock is what auto-detection
-              falls back to anyway. Pinning it cost us both quality and the
-              cell-size correction, since halfBlock assumes a 1:2 cell while
-              the iTerm2 path asks the terminal for its actual cell pixels. */}
+              Protocol is auto-detected rather than pinned to halfBlock. A
+              terminal with native image support then renders a real image, and
+              halfBlock is what auto-detection falls back to anyway. */}
           {imageUrl && (
             <Box height={imageHeight} flexDirection="column">
-              <Image src={imageUrl} width={panelWidth} alt="loading…" />
+              <Image src={imageUrl} alt="loading…" />
             </Box>
           )}
           {markdownLines && markdownLines.length > 0 && (
@@ -678,6 +678,28 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
     })
   }
 
+  // Opening the download URL hands the file to the browser, which for an image
+  // means a tab rather than an image viewer. Fetching a copy first and opening
+  // that lets the OS route it to whatever actually edits or views the type —
+  // Preview on macOS — and gives a real file to drag elsewhere.
+  const openCopyLocally = (item: PCloudFolderItem) => {
+    const fileid = item.fileid
+    if (fileid === undefined) return
+    runAction(async () => {
+      const res = await api.getFileLink(fileid)
+      if (!res.hosts || !res.path)
+        throw new Error(res.error ?? "Failed to get link")
+      const response = await fetch(`https://${res.hosts[0]}${res.path}`)
+      if (!response.ok) throw new Error(`Download failed (${response.status})`)
+      // basename, because a pCloud name is free text and a "/" in it would
+      // otherwise write outside the temp directory.
+      const local = nodePath.join(os.tmpdir(), nodePath.basename(item.name))
+      fs.writeFileSync(local, Buffer.from(await response.arrayBuffer()))
+      await open(local)
+      showResult(`✓ Opened a copy of "${item.name}"`)
+    })
+  }
+
   const copyLink = (fileid: number) => {
     runAction(async () => {
       const res = await api.getFileLink(fileid)
@@ -815,7 +837,10 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
     })
   }
 
-  type ItemAction = { label: string; run: () => void }
+  // detail is shown under the highlighted row. A label short enough to scan is
+  // rarely long enough to say what it touches, and the difference between one
+  // file and the whole account is not a difference to leave to inference.
+  type ItemAction = { label: string; detail?: string; run: () => void }
 
   // Actions are derived from the selection rather than fixed, so the modal never
   // offers something that would fail — no "open" on a trashed file whose parent
@@ -841,6 +866,8 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       const name = entry.metadata?.name ?? "item"
       const recovery = recoveryFor(entry)
 
+      const when = formatTimestamp(entry.time)
+
       // Single-row recovery first: it is the narrower, safer thing, and putting
       // the bulk rewind under the cursor's default would make one keystroke
       // move hundreds of files.
@@ -850,14 +877,21 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
               {
                 label:
                   recovery.kind === "revert"
-                    ? `Revert "${name}" to previous revision`
+                    ? `Revert "${name}" to its previous version`
                     : `Restore "${name}"`,
+                detail:
+                  recovery.kind === "revert"
+                    ? "This file only — undoes this one edit."
+                    : "This item only — brings it back from the trash.",
                 run: () => runRecovery(entry, recovery),
               },
             ]
           : []),
         {
-          label: "Rewind everything to just before this",
+          label: `Rewind the whole account to ${when}`,
+          detail:
+            "Undoes this change and every deletion or edit after it. " +
+            "You will see the counts before anything moves.",
           run: () => rewindTo(entry),
         },
       ]
@@ -870,10 +904,29 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       actions.push({ label: "Open folder", run: enterSelected })
     } else if (selected.fileid !== undefined) {
       const id = selected.fileid
-      actions.push({ label: "Open file", run: () => openFile(id) })
-      actions.push({ label: "Copy download link", run: () => copyLink(id) })
+      actions.push({
+        label: "Open a copy in the default app",
+        detail: "Downloads it and hands it to the OS — Preview, for an image.",
+        run: () => openCopyLocally(selected),
+      })
+      actions.push({
+        label: "Open in browser",
+        detail: "Opens the pCloud download link in your browser.",
+        run: () => openFile(id),
+      })
+      actions.push({
+        label: "Copy download link",
+        detail: "Prints a temporary direct link you can paste elsewhere.",
+        run: () => copyLink(id),
+      })
     }
-    actions.push({ label: "Delete", run: () => deleteSelected(selected) })
+    actions.push({
+      label: "Delete",
+      detail: selected.isfolder
+        ? "Moves this folder and everything inside it to the trash."
+        : "Moves this file to the trash.",
+      run: () => deleteSelected(selected),
+    })
     return actions
   }
 
@@ -1093,7 +1146,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   const CHROME_ROWS = 8
   const overlayRows =
     phase === "actions"
-      ? actionsFor().length + 4
+      ? actionsFor().length + 4 + (actionsFor()[actionCursor]?.detail ? 1 : 0)
       : phase === "confirming"
         ? 3
         : phase === "result"
@@ -1226,14 +1279,18 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
           borderColor="cyan"
         >
           {actionsFor().map((action, i) => (
-            <Text
-              key={action.label}
-              bold={i === actionCursor}
-              color={i === actionCursor ? "cyan" : undefined}
-            >
-              {/* The marker, not the colour, says which row is selected. */}
-              {`${i === actionCursor ? "❯" : " "} ${action.label}`}
-            </Text>
+            <React.Fragment key={action.label}>
+              <Text
+                bold={i === actionCursor}
+                color={i === actionCursor ? "cyan" : undefined}
+              >
+                {/* The marker, not the colour, says which row is selected. */}
+                {`${i === actionCursor ? "❯" : " "} ${action.label}`}
+              </Text>
+              {i === actionCursor && action.detail && (
+                <Text dimColor>{`    ${action.detail}`}</Text>
+              )}
+            </React.Fragment>
           ))}
           <Text color="gray">{"  ↑↓ choose · enter run · esc cancel"}</Text>
         </Box>
