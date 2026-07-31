@@ -21,6 +21,7 @@ type Phase =
   | "executing"
   | "result"
   | "imagePreviewing"
+  | "actions"
 type Mode = "files" | "trash" | "rewind"
 
 const parentPath = (path: string): string => {
@@ -163,20 +164,20 @@ const FILES_PRIMARY: HintPair[] = [
   { key: "\u2191\u2193", label: "navigate" },
   { key: "\u2192", label: "open folder" },
   { key: "\u2190", label: "go back" },
-  { key: "enter", label: "open file" },
+  { key: "enter", label: "actions" },
 ]
 
 const FILES_SECONDARY: HintPair[] = [
   { key: "tab", label: "switch view" },
   { key: "l", label: "copy link" },
-  { key: "d", label: "delete → trash" },
+  { key: "d", label: "delete" },
   { key: "r", label: "reload" },
   { key: "q", label: "quit" },
 ]
 
 const SECONDARY_PRIMARY: HintPair[] = [
   { key: "\u2191\u2193", label: "navigate" },
-  { key: "\u2190", label: "back" },
+  { key: "enter", label: "actions" },
 ]
 
 const SECONDARY_SECONDARY: HintPair[] = [
@@ -185,9 +186,9 @@ const SECONDARY_SECONDARY: HintPair[] = [
   { key: "q", label: "quit" },
 ]
 
-// Rewind is read-only: it reports what changed, and `pcloud rewind` is what
-// acts on it. Offering a restore key here would imply a per-row undo that the
-// view cannot honour, since undoing one event in isolation is rarely coherent.
+// Restoring a single deleted file, or reverting a single edit, is well defined
+// — it is only undoing part of a bulk change that is not, and `pcloud rewind`
+// exists for that. So Rewind offers per-row recovery through the action modal.
 const REWIND_SECONDARY: HintPair[] = [
   { key: "tab", label: "switch view" },
   { key: "r", label: "reload" },
@@ -411,6 +412,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
     (() => Promise<void>) | null
   >(null)
   const [resultMessage, setResultMessage] = useState("")
+  const [actionCursor, setActionCursor] = useState(0)
   const [resultIsError, setResultIsError] = useState(false)
   const [trashItems, setTrashItems] = useState<PCloudTrashItem[]>([])
   const [changes, setChanges] = useState<PCloudDiffEntry[]>([])
@@ -600,6 +602,142 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
     if (path !== "/") setPath(parentPath(path))
   }
 
+  const openFile = (fileid: number) => {
+    runAction(async () => {
+      const res = await api.getFileLink(fileid)
+      if (!res.hosts || !res.path)
+        throw new Error(res.error ?? "Failed to get link")
+      await open(`https://${res.hosts[0]}${res.path}`)
+      showResult("\u2713 Opened")
+    })
+  }
+
+  const copyLink = (fileid: number) => {
+    runAction(async () => {
+      const res = await api.getFileLink(fileid)
+      if (!res.hosts || !res.path)
+        throw new Error(res.error ?? "Failed to get link")
+      showResult(`https://${res.hosts[0]}${res.path}`)
+    })
+  }
+
+  const deleteSelected = (item: PCloudFolderItem) => {
+    const label = item.isfolder
+      ? `Delete "${item.name}" and everything inside it?`
+      : `Delete "${item.name}"?`
+    if (item.isfolder && item.folderid !== undefined) {
+      const id = item.folderid
+      triggerConfirm(label, async () => {
+        const res = await api.deleteFolder(id)
+        if (res.result !== 0) throw new Error(res.error ?? "Delete failed")
+        showResult(`\u2713 Deleted "${item.name}"`)
+        loadFiles(path)
+      })
+      return
+    }
+    if (item.fileid !== undefined) {
+      const id = item.fileid
+      triggerConfirm(label, async () => {
+        const res = await api.deleteFile(id)
+        if (res.result !== 0) throw new Error(res.error ?? "Delete failed")
+        showResult(`\u2713 Deleted "${item.name}"`)
+        loadFiles(path)
+      })
+    }
+  }
+
+  const restoreTrashItem = (item: PCloudTrashItem & { folderid?: number }) => {
+    runAction(async () => {
+      const res =
+        item.folderid !== undefined
+          ? await api.restoreFolderFromTrash(item.folderid)
+          : await api.restoreFromTrash(item.fileid)
+      if (res.result !== 0) throw new Error(res.error ?? "Restore failed")
+      showResult(`\u2713 Restored "${item.name}"`)
+      loadTrash()
+    })
+  }
+
+  // A single deleted file restores cleanly and a single edit reverts cleanly —
+  // it is only undoing *part* of a bulk change that gets incoherent, and that
+  // is what `pcloud rewind` is for. Per-row recovery here is well defined.
+  const restoreChange = (entry: PCloudDiffEntry) => {
+    const fileid = entry.metadata?.fileid
+    if (fileid === undefined) return
+    runAction(async () => {
+      const res = await api.restoreFromTrash(fileid)
+      if (res.result !== 0) throw new Error(res.error ?? "Restore failed")
+      showResult(`\u2713 Restored "${entry.metadata?.name ?? fileid}"`)
+    })
+  }
+
+  const revertChange = (entry: PCloudDiffEntry) => {
+    const fileid = entry.metadata?.fileid
+    if (fileid === undefined) return
+    runAction(async () => {
+      const revisions = await api.listRevisions(fileid)
+      if (revisions.result !== 0)
+        throw new Error(revisions.error ?? "Could not list revisions")
+      const previous = (revisions.revisions ?? [])[0]
+      if (!previous) throw new Error("No earlier revision to revert to")
+      const res = await api.revertRevision(fileid, previous.revisionid)
+      if (res.result !== 0) throw new Error(res.error ?? "Revert failed")
+      showResult(`\u2713 Reverted "${entry.metadata?.name ?? fileid}"`)
+    })
+  }
+
+  type ItemAction = { label: string; run: () => void }
+
+  // Actions are derived from the selection rather than fixed, so the modal never
+  // offers something that would fail — no "open" on a trashed file whose parent
+  // is gone, no "restore" on something that was never deleted.
+  const actionsFor = (): ItemAction[] => {
+    const selected = items[cursor]
+    if (!selected && mode !== "rewind") return []
+
+    if (mode === "trash") {
+      const trashed = trashItems[cursor]
+      if (!trashed) return []
+      return [
+        {
+          label: `Restore "${selected.name}"`,
+          run: () => restoreTrashItem(trashed),
+        },
+      ]
+    }
+
+    if (mode === "rewind") {
+      const entry = changes[cursor]
+      const meta = entry?.metadata
+      if (!entry || meta?.fileid === undefined) return []
+      if (entry.event.startsWith("delete"))
+        return [
+          { label: `Restore "${meta.name}"`, run: () => restoreChange(entry) },
+        ]
+      if (entry.event === "modifyfile")
+        return [
+          {
+            label: `Revert "${meta.name}" to previous revision`,
+            run: () => revertChange(entry),
+          },
+        ]
+      return []
+    }
+
+    if (mode !== "files") return []
+
+    const actions: ItemAction[] = []
+    if (selected.isfolder) {
+      actions.push({ label: "Open folder", run: enterSelected })
+    } else if (selected.fileid !== undefined) {
+      const id = selected.fileid
+      actions.push({ label: "Open file", run: () => openFile(id) })
+      actions.push({ label: "Copy download link", run: () => copyLink(id) })
+    }
+    actions.push({ label: "Delete", run: () => deleteSelected(selected) })
+    return actions
+  }
+
   const returnToFiles = () => {
     setMode("files")
     setTrashItems([])
@@ -630,7 +768,31 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       return
     }
 
+    if (phase === "actions") {
+      const actions = actionsFor()
+      if (key.escape || input === "q") {
+        setPhase("browsing")
+        return
+      }
+      if (key.downArrow)
+        setActionCursor((c) => Math.min(actions.length - 1, c + 1))
+      if (key.upArrow) setActionCursor((c) => Math.max(0, c - 1))
+      if (key.return) {
+        const chosen = actions[actionCursor]
+        setPhase("browsing")
+        chosen?.run()
+      }
+      return
+    }
+
     if (phase !== "browsing") return
+
+    if (key.return) {
+      if (actionsFor().length === 0) return
+      setActionCursor(0)
+      setPhase("actions")
+      return
+    }
 
     if (input === "q") {
       onExit()
@@ -663,20 +825,6 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       if (input === "r") loadFiles(path)
       if (key.rightArrow) enterSelected()
       if (key.leftArrow) goUp()
-      if (key.return && !selected?.isfolder) {
-        const id = selected?.fileid
-        if (id !== undefined) {
-          runAction(async () => {
-            const res = await api.getFileLink(id)
-            if (!res.hosts || !res.path)
-              throw new Error(res.error ?? "Failed to get link")
-            await open(`https://${res.hosts[0]}${res.path}`)
-            showResult(`✓ Opened in browser`)
-          })
-        }
-        return
-      }
-      if (key.return && selected?.isfolder) enterSelected()
 
       if (!selected) return
 
@@ -754,8 +902,11 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
     }
 
     if (mode === "trash") {
-      if (key.leftArrow || key.escape) {
-        returnToFiles()
+      // Left used to mean "leave", back when trash was a sub-mode entered from
+      // files. As a tab it is a peer, not a child — tab is how you leave — so
+      // left has nothing to go up to and should stay put.
+      if (key.escape) {
+        switchTo("files")
         return
       }
 
@@ -888,6 +1039,28 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
               <Text color="white" dimColor>{` cancel`}</Text>
             </Box>
           </Box>
+        </Box>
+      )}
+      {phase === "actions" && (
+        <Box
+          marginTop={1}
+          marginX={1}
+          paddingX={1}
+          flexDirection="column"
+          borderStyle="round"
+          borderColor="cyan"
+        >
+          {actionsFor().map((action, i) => (
+            <Text
+              key={action.label}
+              bold={i === actionCursor}
+              color={i === actionCursor ? "cyan" : undefined}
+            >
+              {/* The marker, not the colour, says which row is selected. */}
+              {`${i === actionCursor ? "❯" : " "} ${action.label}`}
+            </Text>
+          ))}
+          <Text color="gray">{"  ↑↓ choose · enter run · esc cancel"}</Text>
         </Box>
       )}
       {phase === "result" && (
