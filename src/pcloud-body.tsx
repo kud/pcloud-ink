@@ -270,7 +270,7 @@ const Preview = ({
       paddingX={1}
     >
       {item === undefined ? (
-        <Text dimColor color="gray">
+        <Text color="gray">
           No selection
         </Text>
       ) : (
@@ -320,19 +320,19 @@ const Preview = ({
             {formatDate(item.modified)}
           </Text>
           <Box>
-            <Text dimColor color="gray">
+            <Text color="gray">
               {"id "}
             </Text>
-            <Text dimColor color="gray">
+            <Text color="gray">
               {item.isfolder
                 ? String(item.folderid ?? "")
                 : String(item.fileid ?? "")}
             </Text>
           </Box>
-          <Text dimColor color="gray">
+          <Text color="gray">
             ────────────────
           </Text>
-          <Text dimColor color="gray">
+          <Text color="gray">
             {item.isfolder ? "\u2192 enter to open" : "enter to open"}
           </Text>
         </>
