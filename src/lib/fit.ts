@@ -8,7 +8,10 @@
 // exact, which is the whole point.
 export const fit = (text: string, width: number): string => {
   if (width <= 0) return ""
-  if (text.length === width) return text
   if (text.length < width) return text.padEnd(width)
-  return width === 1 ? "…" : `${text.slice(0, width - 2)}… `
+  // A value that exactly fills its column is as broken as one that overruns it:
+  // '"8 Folders" from 30 Jul 2026 16:00.zip' is exactly 38 characters, and
+  // returning it untouched printed "…16:00.zip0 Bytes". The final cell is always
+  // a gutter, so truncation starts one character earlier than looks necessary.
+  return width === 1 ? " " : `${text.slice(0, width - 2)}… `
 }

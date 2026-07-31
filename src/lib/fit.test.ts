@@ -13,8 +13,19 @@ test("a short value is padded to the exact width", () => {
   expect(fit("ab", 6)).toHaveLength(6)
 })
 
-test("an exact-width value is left alone", () => {
-  expect(fit("abcdef", 6)).toBe("abcdef")
+// Returning an exact-width value untouched is what printed
+// "…16:00.zip0 Bytes": the name filled its column exactly, so the size began
+// in the very next cell. The last character is always a gutter.
+test("an exact-width value still yields a gutter", () => {
+  expect(fit("abcdef", 6)).toBe("abcd… ")
+  expect(fit("abcdef", 6)).toHaveLength(6)
+  expect(fit("abcdef", 6).endsWith(" ")).toBe(true)
+})
+
+test("every result long enough to have one ends in a gutter", () => {
+  for (const text of ["a", "abcdef", "abcdefghijklmnop"]) {
+    expect(fit(text, 8).endsWith(" ")).toBe(true)
+  }
 })
 
 // Whatever the input, the column is the width it claims — that invariant is
