@@ -264,6 +264,22 @@ const ItemRow = ({
   )
 }
 
+// Trash-root entries are mostly folders, which carry no deletetime — and
+// new Date(NaN).toISOString() throws rather than degrading, so the whole view
+// crashed on the first folder it met. Extracted so a test can pin that.
+export const trashItemToRow = (
+  item: PCloudTrashItem & { folderid?: number },
+): PCloudFolderItem => ({
+  fileid: item.fileid,
+  folderid: item.folderid,
+  name: item.name,
+  isfolder: item.folderid !== undefined,
+  size: item.size,
+  modified: item.deletetime
+    ? new Date(item.deletetime * 1000).toISOString().slice(0, 10)
+    : undefined,
+})
+
 const MD_EXTS = new Set(["md", "mdx", "markdown"])
 const isMarkdownFile = (name: string): boolean =>
   MD_EXTS.has(name.split(".").pop()?.toLowerCase() ?? "")
@@ -557,13 +573,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
         const raw: PCloudTrashItem[] = (response.contents ??
           []) as PCloudTrashItem[]
         setTrashItems(raw)
-        const mapped: PCloudFolderItem[] = raw.map((item) => ({
-          fileid: item.fileid,
-          name: item.name,
-          isfolder: false,
-          size: item.size,
-          modified: new Date(item.deletetime * 1000).toISOString().slice(0, 10),
-        }))
+        const mapped: PCloudFolderItem[] = raw.map(trashItemToRow)
         setItems(mapped)
         setCursor(0)
         setPhase("browsing")
@@ -789,13 +799,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   const aboveCount = windowStart
   const belowCount = items.length - windowEnd
 
-  if (phase === "loading" || phase === "executing") {
-    return (
-      <Spinner
-        label={phase === "executing" ? "Executing\u2026" : "Loading\u2026"}
-      />
-    )
-  }
+  const busy = phase === "loading" || phase === "executing"
 
   // Claiming the full terminal height is what pins the footer to the bottom:
   // without an explicit height the column shrinks to its content, so the hints
@@ -805,7 +809,18 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       <Header path={path} mode={mode} />
       <Box flexDirection="row" flexGrow={1} marginTop={1}>
         <Box flexDirection="column" flexGrow={1}>
-          {mode === "rewind" ? (
+          {/* Only the content waits. Replacing the whole screen with a spinner
+              tore down the tabs and footer on every switch, so the chrome
+              flickered away and back for something that is usually instant. */}
+          {busy ? (
+            <Box paddingX={1}>
+              <Spinner
+                label={
+                  phase === "executing" ? "Executing\u2026" : "Loading\u2026"
+                }
+              />
+            </Box>
+          ) : mode === "rewind" ? (
             <Box paddingX={1}>
               <ChangesList
                 entries={changes}
@@ -889,7 +904,10 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
           </Text>
         </Box>
       )}
-      <Footer count={mode === "rewind" ? changes.length : items.length} mode={mode} />
+      <Footer
+        count={mode === "rewind" ? changes.length : items.length}
+        mode={mode}
+      />
     </Box>
   )
 }
