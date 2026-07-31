@@ -1152,7 +1152,16 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
         : phase === "result"
           ? 2
           : 0
-  const visibleCount = Math.max(1, terminalRows - CHROME_ROWS - overlayRows)
+  // The "N more" markers above and below the window occupy rows of their own,
+  // and the file list is the only view that draws them. Reserving both
+  // unconditionally costs two lines on a list that already fits, which beats
+  // the self-referential alternative where the window size depends on whether
+  // the window overflows.
+  const SCROLL_MARKER_ROWS = mode === "rewind" ? 0 : 2
+  const visibleCount = Math.max(
+    1,
+    terminalRows - CHROME_ROWS - overlayRows - SCROLL_MARKER_ROWS,
+  )
   const selectedChange = changes[cursor]
   const windowStart = Math.min(
     Math.max(0, cursor - Math.floor(visibleCount / 2)),
@@ -1203,8 +1212,11 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
             <>
               {aboveCount > 0 && (
                 <Box paddingX={2}>
+                  {/* Template literal, not bare JSX text: JSX text is not a string
+                      literal, so a written-out escape renders as its own
+                      six characters instead of the arrow. */}
                   <Text color="yellow" dimColor>
-                    \u2191 {aboveCount} more
+                    {`\u2191 ${aboveCount} more`}
                   </Text>
                 </Box>
               )}
@@ -1218,7 +1230,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
               {belowCount > 0 && (
                 <Box paddingX={2}>
                   <Text color="yellow" dimColor>
-                    \u2193 {belowCount} more
+                    {`\u2193 ${belowCount} more`}
                   </Text>
                 </Box>
               )}
@@ -1280,15 +1292,22 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
         >
           {actionsFor().map((action, i) => (
             <React.Fragment key={action.label}>
+              {/* Truncate rather than wrap. The rows reserved for this modal
+                  are counted, and a line that silently becomes two puts the
+                  count back out by one — which is how the labels came to be
+                  composited on top of each other. */}
               <Text
                 bold={i === actionCursor}
                 color={i === actionCursor ? "cyan" : undefined}
+                wrap="truncate-end"
               >
                 {/* The marker, not the colour, says which row is selected. */}
                 {`${i === actionCursor ? "❯" : " "} ${action.label}`}
               </Text>
               {i === actionCursor && action.detail && (
-                <Text dimColor>{`    ${action.detail}`}</Text>
+                <Text dimColor wrap="truncate-end">
+                  {`    ${action.detail}`}
+                </Text>
               )}
             </React.Fragment>
           ))}
