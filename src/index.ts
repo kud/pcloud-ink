@@ -17,6 +17,15 @@ export {
   AccountPanel,
   type AccountPanelProps,
 } from "./components/account-panel.js"
+// The assembled interactive browser. Embeddable: it does not own the terminal
+// or call render(), reporting quit through the required onExit callback, so a
+// host — the CLI, a cockpit pane — mounts it as one component and keeps the
+// terminal lifecycle to itself.
+export {
+  PCloudBody,
+  PCloudBrowser,
+  type PCloudBodyProps,
+} from "./pcloud-body.js"
 export { eventTone, isFolderEvent, type EventTone } from "./lib/event.js"
 export { windowSlice } from "./lib/window.js"
 export { Panel } from "@kud/ink-ui"
