@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react"
 import { Box, Text, useInput, useWindowSize } from "ink"
-import { Spinner, Tabs, type TabItem } from "@kud/ink-ui"
+import { Spinner, Tabs, TextInput, type TabItem } from "@kud/ink-ui"
 import { ChangesList } from "./components/changes-list.js"
 import { ShareList, shareRights } from "./components/share-list.js"
 import { isFolderEvent } from "./lib/event.js"
@@ -40,6 +40,7 @@ type Phase =
   | "result"
   | "imagePreviewing"
   | "actions"
+  | "uploading"
 type Mode = "files" | "trash" | "rewind" | "shares"
 
 const parentPath = (path: string): string => {
@@ -188,6 +189,7 @@ const FILES_PRIMARY: HintPair[] = [
 
 const FILES_SECONDARY: HintPair[] = [
   { key: "tab", label: "switch view" },
+  { key: "u", label: "upload" },
   { key: "l", label: "copy link" },
   { key: "d", label: "delete" },
   { key: "r", label: "reload" },
@@ -643,6 +645,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   const [actionCursor, setActionCursor] = useState(0)
   const [resultIsError, setResultIsError] = useState(false)
   const [trashItems, setTrashItems] = useState<PCloudTrashItem[]>([])
+  const [currentFolderId, setCurrentFolderId] = useState<number | undefined>()
   const [changes, setChanges] = useState<PCloudDiffEntry[]>([])
   const [outgoing, setOutgoing] = useState<PCloudShareItem[]>([])
   const [incoming, setIncoming] = useState<PCloudShareItem[]>([])
@@ -779,6 +782,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       .listFolder(targetPath)
       .then((response) => {
         const contents = response.metadata?.contents ?? []
+        setCurrentFolderId(response.metadata?.folderid)
         setItems(sortItems(contents))
         setCursor(0)
         setPhase("browsing")
@@ -987,6 +991,30 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   // A single deleted file restores cleanly and a single edit reverts cleanly —
   // it is only undoing *part* of a bulk change that gets incoherent, and that
   // is what `pcloud rewind` is for. Per-row recovery here is well defined.
+  const uploadInto = (local: string) => {
+    setPhase("browsing")
+    const target = currentFolderId
+    if (target === undefined) {
+      showResult("Cannot tell which folder this is — reload and try again", true)
+      return
+    }
+
+    const source = local.trim().replace(/^~/, os.homedir())
+    if (!source) return
+
+    runAction(async () => {
+      if (!fs.existsSync(source)) throw new Error(`No such file: ${source}`)
+      if (fs.statSync(source).isDirectory())
+        throw new Error("That is a folder. pCloud's upload takes one file at a time.")
+
+      const name = nodePath.basename(source)
+      const res = await api.uploadFile(target, name, fs.readFileSync(source))
+      if (res.result !== 0) throw new Error(res.error ?? "Upload failed")
+      showResult(`✓ Uploaded "${name}"`)
+      loadFiles(path)
+    })
+  }
+
   const stopSharing = (share: PCloudShareItem) => {
     triggerConfirm(
       `Stop sharing "${share.foldername ?? share.folderid}" with ${share.tomail ?? "the recipient"}?`,
@@ -1214,6 +1242,11 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       })
     }
     actions.push({
+      label: "Upload a file here",
+      detail: `Puts a local file into ${path} — the folder you are already in.`,
+      run: () => setPhase("uploading"),
+    })
+    actions.push({
       label: "Delete",
       detail: selected.isfolder
         ? "Moves this folder and everything inside it to the trash."
@@ -1236,6 +1269,13 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   }
 
   useInput((input, key) => {
+    if (phase === "uploading") {
+      // Only escape: every other keystroke is the TextInput's, and stealing
+      // them here would eat the path as it is typed.
+      if (key.escape) setPhase("browsing")
+      return
+    }
+
     if (phase === "result") {
       setPhase("browsing")
       return
@@ -1346,6 +1386,10 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
 
     if (mode === "files") {
       const selected = items[cursor]
+      if (input === "u") {
+        setPhase("uploading")
+        return
+      }
       if (input === "r") loadFiles(path)
       if (key.rightArrow) enterSelected()
       if (key.leftArrow) goUp()
@@ -1473,7 +1517,9 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   const overlayRows =
     phase === "actions"
       ? actionsFor().length + ACTION_MODAL_CHROME
-      : phase === "confirming"
+      : phase === "uploading"
+        ? 6
+        : phase === "confirming"
         ? 3
         : phase === "result"
           ? 2
@@ -1692,6 +1738,19 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
             {`  ${actionsFor()[actionCursor]?.detail ?? ""}`}
           </Text>
           <Text color="gray">{"  ↑↓ choose · enter run · esc cancel"}</Text>
+        </Box>
+      )}
+      {phase === "uploading" && (
+        <Box marginTop={1} marginX={1} paddingX={1} flexDirection="column" borderStyle="round" borderColor="cyan">
+          <Text bold color="cyan">{`Upload into ${path}`}</Text>
+          <Box>
+            <Text color="gray">{"  "}</Text>
+            <TextInput
+              placeholder="~/path/to/file"
+              onSubmit={(value) => uploadInto(value)}
+            />
+          </Box>
+          <Text color="gray">{"  enter upload · esc cancel"}</Text>
         </Box>
       )}
       {phase === "result" && (
