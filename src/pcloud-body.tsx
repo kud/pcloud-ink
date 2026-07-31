@@ -162,9 +162,9 @@ const FILES_PRIMARY: HintPair[] = [
 ]
 
 const FILES_SECONDARY: HintPair[] = [
-  { key: "t", label: "trash" },
-  { key: "l", label: "link" },
-  { key: "d", label: "delete" },
+  { key: "t", label: "view trash" },
+  { key: "l", label: "copy link" },
+  { key: "d", label: "delete → trash" },
   { key: "r", label: "reload" },
   { key: "q", label: "quit" },
 ]
@@ -175,7 +175,7 @@ const SECONDARY_PRIMARY: HintPair[] = [
 ]
 
 const SECONDARY_SECONDARY: HintPair[] = [
-  { key: "r", label: "restore" },
+  { key: "r", label: "restore from trash" },
   { key: "q", label: "quit" },
 ]
 
@@ -619,7 +619,11 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       if (!selected) return
 
       if (input === "d") {
-        const label = `Delete "${selected.name}"?`
+        // A folder delete is recursive, which the bare name does not convey —
+        // and the count of what is about to go is not knowable from this view.
+        const label = selected.isfolder
+          ? `Delete "${selected.name}" and everything inside it?`
+          : `Delete "${selected.name}"?`
         if (selected.isfolder && selected.folderid !== undefined) {
           const id = selected.folderid
           triggerConfirm(label, async () => {
