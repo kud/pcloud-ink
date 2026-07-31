@@ -1,5 +1,5 @@
 import { test, expect } from "vitest"
-import { trashItemToRow, recoveryFor, changeItemToRow } from "./pcloud-body.js"
+import { trashItemToRow, recoveryFor } from "./pcloud-body.js"
 
 // A trashed folder has no deletetime, and new Date(NaN).toISOString() throws
 // rather than returning something harmless — so this crashed the whole Trash
@@ -79,31 +79,4 @@ test("a creation has no recovery, since undoing it would delete real data", () =
       metadata: { fileid: 7, name: "notes.md" },
     }),
   ).toBeUndefined()
-})
-
-test("a change row carries its own name rather than the Files selection", () => {
-  const row = changeItemToRow({
-    diffid: 5,
-    event: "modifyfile",
-    time: "Fri, 31 Jul 2026 18:56:35 +0000",
-    metadata: { fileid: 7, name: "notes.md", path: "/docs/notes.md", size: 12 },
-  })
-
-  expect(row?.name).toBe("/docs/notes.md")
-  expect(row?.isfolder).toBe(false)
-  expect(row?.modified).toBe("2026-07-31")
-})
-
-// Same trap as trashItemToRow: new Date(NaN).toISOString() throws rather than
-// degrading, and diff timestamps are not always parseable.
-test("an unparseable change timestamp does not throw", () => {
-  const row = changeItemToRow({
-    diffid: 6,
-    event: "createfolder",
-    time: "not a date",
-    metadata: { folderid: 3, name: "rr-cache" },
-  })
-
-  expect(row?.modified).toBeUndefined()
-  expect(row?.isfolder).toBe(true)
 })

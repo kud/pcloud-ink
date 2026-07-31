@@ -3,6 +3,16 @@ import { Box, Text, useInput, useWindowSize } from "ink"
 import { Spinner, Tabs, type TabItem } from "@kud/ink-ui"
 import { ChangesList } from "./components/changes-list.js"
 import { isFolderEvent } from "./lib/event.js"
+import {
+  buildRows,
+  clockTime,
+  firstSelectable,
+  nextSelectable,
+  relativeAge,
+  sparkline,
+  type EventRun,
+  type RewindRow,
+} from "./lib/rewind-rows.js"
 import Image, { TerminalInfoProvider } from "ink-picture"
 import open from "open"
 import { execFileSync } from "child_process"
@@ -17,7 +27,7 @@ import {
   resolveStoredAuth,
   planRewind,
   applyRewind,
-  formatTimestamp,
+  pathResolver,
 } from "@kud/pcloud"
 
 type Phase =
@@ -192,9 +202,16 @@ const SECONDARY_SECONDARY: HintPair[] = [
   { key: "q", label: "quit" },
 ]
 
-// Restoring a single deleted file, or reverting a single edit, is well defined
-// — it is only undoing part of a bulk change that is not, and `pcloud rewind`
-// exists for that. So Rewind offers per-row recovery through the action modal.
+// A day's saves on one file fold into a single row, so the arrows expand and
+// collapse a run rather than descending a tree. Recovery and the bulk rewind
+// both live in the action modal, since neither is a keystroke to hit by accident.
+const REWIND_PRIMARY: HintPair[] = [
+  { key: "\u2191\u2193", label: "navigate" },
+  { key: "\u2192", label: "expand run" },
+  { key: "\u2190", label: "collapse" },
+  { key: "enter", label: "actions" },
+]
+
 const REWIND_SECONDARY: HintPair[] = [
   { key: "tab", label: "switch view" },
   { key: "r", label: "reload" },
@@ -202,7 +219,12 @@ const REWIND_SECONDARY: HintPair[] = [
 ]
 
 const Footer = ({ count, mode }: { count: number; mode: Mode }) => {
-  const primary = mode === "files" ? FILES_PRIMARY : SECONDARY_PRIMARY
+  const primary =
+    mode === "files"
+      ? FILES_PRIMARY
+      : mode === "rewind"
+        ? REWIND_PRIMARY
+        : SECONDARY_PRIMARY
   const secondary =
     mode === "files"
       ? FILES_SECONDARY
@@ -320,27 +342,6 @@ export const recoveryFor = (
   return undefined
 }
 
-// The Rewind list holds change events while the preview panel speaks
-// PCloudFolderItem. Without this mapping the panel kept showing whatever was
-// selected in Files before the tab switch, since nothing clears that list.
-export const changeItemToRow = (
-  entry: PCloudDiffEntry,
-): PCloudFolderItem | undefined => {
-  const meta = entry.metadata
-  if (!meta) return undefined
-  const at = new Date(entry.time)
-  return {
-    fileid: meta.fileid,
-    folderid: meta.folderid,
-    name: meta.path ?? meta.name ?? "-",
-    isfolder: isFolderEvent(entry.event),
-    size: meta.size,
-    modified: Number.isNaN(at.getTime())
-      ? undefined
-      : at.toISOString().slice(0, 10),
-  }
-}
-
 const MD_EXTS = new Set(["md", "mdx", "markdown"])
 const isMarkdownFile = (name: string): boolean =>
   MD_EXTS.has(name.split(".").pop()?.toLowerCase() ?? "")
@@ -438,6 +439,78 @@ const Preview = ({
   )
 }
 
+// The Rewind panel describes a run rather than a file: how often it was
+// touched, over what span, and where the activity actually fell. A count alone
+// cannot distinguish a burst from a trickle, which is the thing worth knowing
+// before undoing any of it.
+const RunPreview = ({
+  run,
+  entry,
+  path,
+  now,
+}: {
+  run: EventRun | undefined
+  entry: PCloudDiffEntry | undefined
+  path: string | undefined
+  now: Date
+}) => (
+  <Box
+    flexBasis="45%"
+    flexDirection="column"
+    borderLeft={true}
+    borderStyle="single"
+    borderColor="gray"
+    paddingX={1}
+  >
+    {run === undefined ? (
+      <Text color="gray">No selection</Text>
+    ) : (
+      <>
+        <Text color="white" bold wrap="truncate-start">
+          {run.name}
+        </Text>
+        {path && path !== run.name && (
+          <Text dimColor color="white" wrap="truncate-start">
+            {path}
+          </Text>
+        )}
+        <Box marginTop={1}>
+          <Text color={run.isFolder ? "yellow" : "cyan"} bold>
+            {run.isFolder ? "DIR" : "FILE"}
+          </Text>
+        </Box>
+        {run.count > 1 ? (
+          <>
+            <Text dimColor color="white">
+              {`${run.count} changes  ${clockTime(run.first.time)} → ${clockTime(run.last.time)}`}
+            </Text>
+            <Text color="cyan">
+              {`${sparkline(run.entries.map((e) => e.time))}  across the run`}
+            </Text>
+          </>
+        ) : (
+          <Text dimColor color="white">
+            {clockTime(run.last.time)}
+          </Text>
+        )}
+        <Text dimColor color="white">
+          {relativeAge((entry ?? run.last).time, now)}
+        </Text>
+        <Box>
+          <Text color="gray">{"id "}</Text>
+          <Text color="gray">{String(run.fileid ?? run.folderid ?? "")}</Text>
+        </Box>
+        <Text color="gray">{"────────────────"}</Text>
+        <Text color="gray">
+          {run.count > 1
+            ? "→ expand · enter to recover or rewind"
+            : "enter to recover or rewind"}
+        </Text>
+      </>
+    )}
+  </Box>
+)
+
 const ImagePreview = ({
   imagePath,
   onExit,
@@ -482,6 +555,27 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   const [resultIsError, setResultIsError] = useState(false)
   const [trashItems, setTrashItems] = useState<PCloudTrashItem[]>([])
   const [changes, setChanges] = useState<PCloudDiffEntry[]>([])
+  const [expandedRuns, setExpandedRuns] = useState<ReadonlySet<string>>(
+    new Set(),
+  )
+  const [changePaths, setChangePaths] = useState<ReadonlyMap<number, string>>(
+    new Map(),
+  )
+  // Relative ages are only honest if the clock they are measured against keeps
+  // moving. A minute is finer than the labels this feeds ("2m ago", "3h ago").
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const tick = setInterval(() => setNow(new Date()), 60_000)
+    return () => clearInterval(tick)
+  }, [])
+
+  // Built here as well as inside ChangesList, from the same inputs: the cursor
+  // indexes rows rather than events, so key handling needs the same list the
+  // renderer draws. buildRows is pure, so the two cannot disagree.
+  const rewindRows: RewindRow[] = React.useMemo(
+    () => buildRows(changes, expandedRuns, now),
+    [changes, expandedRuns, now],
+  )
   const api = React.useMemo(() => buildAPI(), [])
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null)
   const [previewImageItem, setPreviewImageItem] = useState<string | null>(null)
@@ -599,14 +693,33 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       })
   }
 
+  // Paths are resolved after the list is already on screen. Every folder the
+  // diff stream does not describe costs a listfolder round trip, and blocking
+  // the whole view on those would trade a readable label for a visible stall —
+  // so the names render first and grow into paths a moment later.
+  const resolvePaths = (entries: PCloudDiffEntry[]) => {
+    const toPath = pathResolver(api, entries)
+    Promise.all(
+      entries.map(
+        async (entry) => [entry.diffid, await toPath(entry)] as const,
+      ),
+    )
+      .then((pairs) => setChangePaths(new Map(pairs)))
+      .catch(() => {})
+  }
+
   const loadChanges = () => {
     setPhase("loading")
     api
       .diff({ last: 200 })
       .then((response) => {
-        setChanges((response.entries ?? []).slice().reverse())
-        setCursor(0)
+        const entries = (response.entries ?? []).slice().reverse()
+        setChanges(entries)
+        setChangePaths(new Map())
+        setExpandedRuns(new Set())
+        setCursor(firstSelectable(buildRows(entries, new Set(), now)))
         setPhase("browsing")
+        resolvePaths(entries)
       })
       .catch((error: unknown) => {
         showResult(error instanceof Error ? error.message : String(error), true)
@@ -862,17 +975,37 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
     }
 
     if (mode === "rewind") {
-      const entry = changes[cursor]
-      if (!entry) return []
+      const row = rewindRows[cursor]
+      if (!row || row.kind === "day") return []
+
+      // Recovery acts on the newest event in a run — reverting to the version
+      // before the last save is what "undo that edit" means. A rewind starts
+      // from the oldest, so choosing a run undoes the run rather than its final
+      // moment. Expanding the run is how you reach anything in between.
+      const entry = row.kind === "event" ? row.entry : row.run.last
+      const rewindFrom = row.kind === "event" ? row.entry : row.run.first
       const name = entry.metadata?.name ?? "item"
       const recovery = recoveryFor(entry)
 
-      const when = formatTimestamp(entry.time)
+      const when = clockTime(rewindFrom.time)
+      const expandable = row.kind === "run" && row.run.count > 1
 
       // Single-row recovery first: it is the narrower, safer thing, and putting
       // the bulk rewind under the cursor's default would make one keystroke
       // move hundreds of files.
       return [
+        ...(expandable
+          ? [
+              {
+                label: `Show the ${row.run.count} changes in this run`,
+                detail:
+                  "Lists each save on its own row, so you can act on one " +
+                  "moment rather than the whole day. Same as the right arrow.",
+                run: () =>
+                  setExpandedRuns((open) => new Set(open).add(row.run.key)),
+              },
+            ]
+          : []),
         ...(recovery
           ? [
               {
@@ -882,7 +1015,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
                     : `Restore "${name}"`,
                 detail:
                   recovery.kind === "revert"
-                    ? "This file only — undoes this one edit."
+                    ? "This file only — undoes its most recent edit."
                     : "This item only — brings it back from the trash.",
                 run: () => runRecovery(entry, recovery),
               },
@@ -893,7 +1026,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
           detail:
             "Undoes this change and every deletion or edit after it. " +
             "You will see the counts before anything moves.",
-          run: () => rewindTo(entry),
+          run: () => rewindTo(rewindFrom),
         },
       ]
     }
@@ -1015,12 +1148,33 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       return
     }
 
-    // Rewind lists change events rather than files, so the cursor is bounded by
-    // that list and none of the file or trash actions below apply to it.
+    // Rewind lists day headings and folded runs rather than files, so the
+    // cursor moves over rows — skipping the headings — and none of the file or
+    // trash actions below apply to it.
     if (mode === "rewind") {
-      if (key.downArrow) setCursor((c) => Math.min(changes.length - 1, c + 1))
-      if (key.upArrow) setCursor((c) => Math.max(0, c - 1))
+      if (key.downArrow) setCursor((c) => nextSelectable(rewindRows, c, 1))
+      if (key.upArrow) setCursor((c) => nextSelectable(rewindRows, c, -1))
       if (input === "r") loadChanges()
+
+      const row = rewindRows[cursor]
+      if (row?.kind === "day" || row === undefined) return
+
+      if (key.rightArrow && row.kind === "run" && row.run.count > 1)
+        setExpandedRuns((open) => new Set(open).add(row.run.key))
+
+      if (key.leftArrow) {
+        const runKey = row.run.key
+        setExpandedRuns((open) => {
+          const next = new Set(open)
+          next.delete(runKey)
+          return next
+        })
+        // Collapsing from inside a run has to carry the cursor back out to the
+        // run's own row, or every row below shifts up under a selection that
+        // stayed where it was.
+        if (row.kind === "event")
+          setCursor(rewindRows.findIndex((r) => r.key === runKey))
+      }
       return
     }
 
@@ -1171,7 +1325,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
     1,
     terminalRows - CHROME_ROWS - overlayRows - SCROLL_MARKER_ROWS,
   )
-  const selectedChange = changes[cursor]
+  const selectedRow = rewindRows[cursor]
   const windowStart = Math.min(
     Math.max(0, cursor - Math.floor(visibleCount / 2)),
     Math.max(0, items.length - visibleCount),
@@ -1209,6 +1363,9 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
                 selected={cursor}
                 rows={visibleCount}
                 emptyText="No recent changes"
+                expanded={expandedRuns}
+                paths={changePaths}
+                now={now}
               />
             </Box>
           ) : items.length === 0 ? (
@@ -1247,13 +1404,17 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
           )}
         </Box>
         {mode === "rewind" ? (
-          <Preview
-            item={selectedChange && changeItemToRow(selectedChange)}
-            hint={
-              selectedChange && recoveryFor(selectedChange)
-                ? "enter to recover or rewind"
-                : "enter to rewind from here"
+          <RunPreview
+            run={selectedRow?.kind === "day" ? undefined : selectedRow?.run}
+            entry={
+              selectedRow?.kind === "event" ? selectedRow.entry : undefined
             }
+            path={
+              selectedRow && selectedRow.kind !== "day"
+                ? changePaths.get(selectedRow.run.last.diffid)
+                : undefined
+            }
+            now={now}
           />
         ) : (
           <Preview

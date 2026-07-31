@@ -29,15 +29,24 @@ test("names line up even when a path overflows the row", () => {
 
   const { lastFrame } = render(
     <Box width={WIDTH}>
-      <ChangesList entries={entries} rows={10} />
+      <ChangesList entries={entries} rows={20} />
     </Box>,
   )
-  const lines = (lastFrame() ?? "").split("\n").filter(Boolean)
+  // The first line is now the day heading, which has no columns to align.
+  const lines = (lastFrame() ?? "")
+    .split("\n")
+    .filter(Boolean)
+    .filter((line) => !line.includes("change"))
 
   expect(lines).toHaveLength(names.length)
 
-  // Long names truncate, so match on a prefix that survives truncation.
-  const columns = lines.map((line, i) => line.indexOf(names[i].slice(0, 6)))
+  // Measure where the fixed columns end rather than where a name starts:
+  // truncation is at the start now, so a long path shows its tail behind an
+  // ellipsis and has no prefix left to search for. The width of the time,
+  // event and count columns is the thing that used to collapse.
+  const columns = lines.map(
+    (line) => line.match(/^\s*\d\d:\d\d\s+\S \w+\s+/)?.[0].length ?? -1,
+  )
   expect(columns.every((column) => column > 0)).toBe(true)
   expect(new Set(columns).size).toBe(1)
 })

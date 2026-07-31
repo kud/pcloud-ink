@@ -69,18 +69,27 @@ test("ChangesList labels events in text, so state survives without colour", () =
   expect(frame).toContain("- deleted")
 })
 
-test("ChangesList distinguishes folder events from file events", () => {
+// The dir/file column is gone: the event name already carries it
+// (createfolder vs createfile) and the panel states DIR or FILE outright, so a
+// third restatement was only spending a column.
+test("ChangesList marks folders with a trailing slash, not a kind column", () => {
   const { lastFrame } = render(<ChangesList entries={entries} rows={10} />)
   const frame = lastFrame() ?? ""
-  expect(frame).toContain("dir")
-  expect(frame).toContain("file")
+  expect(frame).toContain("gone/")
+  expect(frame).toContain("new.txt")
 })
 
-test("ChangesList strips the weekday and offset from timestamps", () => {
-  const { lastFrame } = render(<ChangesList entries={entries} rows={10} />)
+// The date moved into a day heading and the row keeps only a clock time —
+// two hundred rows repeating the same date was the noise this replaced.
+test("ChangesList puts the date in a heading and the time on the row", () => {
+  const now = new Date("2026-07-31T12:00:00Z")
+  const { lastFrame } = render(
+    <ChangesList entries={entries} rows={10} now={now} />,
+  )
   const frame = lastFrame() ?? ""
-  expect(frame).toContain("30 Jul 2026 20:46:27")
+  expect(frame).toContain("Yesterday")
   expect(frame).not.toContain("+0000")
+  expect(frame).not.toContain("30 Jul 2026")
 })
 
 test("ChangesList shows the empty state", () => {

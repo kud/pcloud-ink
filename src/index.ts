@@ -29,3 +29,15 @@ export {
 export { eventTone, isFolderEvent, type EventTone } from "./lib/event.js"
 export { windowSlice } from "./lib/window.js"
 export { Panel } from "@kud/ink-ui"
+export {
+  buildRuns,
+  buildRows,
+  dayLabel,
+  relativeAge,
+  clockTime,
+  sparkline,
+  nextSelectable,
+  firstSelectable,
+  type EventRun,
+  type RewindRow,
+} from "./lib/rewind-rows.js"
