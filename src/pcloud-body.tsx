@@ -358,7 +358,12 @@ const Preview = ({
   hint?: string
 }) => {
   const { rows = 24 } = useWindowSize()
-  const imageHeight = Math.max(10, rows - 10)
+  // Two rows of slack, and a margin, because the native image protocols draw in
+  // absolute pixels rather than being laid out in cells: ITerm2.js reserves
+  // Math.ceil(px / cellSize) cells, so an image whose height is not an exact
+  // multiple of the cell height claims one more cell than the box gave it and
+  // paints over the panel border. Slack absorbs the rounding.
+  const imageHeight = Math.max(8, rows - 12)
 
   return (
     <Box
@@ -384,7 +389,7 @@ const Preview = ({
               terminal with native image support then renders a real image, and
               halfBlock is what auto-detection falls back to anyway. */}
           {imageUrl && (
-            <Box height={imageHeight} flexDirection="column">
+            <Box height={imageHeight} marginTop={1} flexDirection="column">
               <Image src={imageUrl} alt="loading…" />
             </Box>
           )}
