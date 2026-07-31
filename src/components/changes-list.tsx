@@ -12,8 +12,15 @@ export type ChangesListProps = {
   emptyText?: string
 }
 
+// Columns are boxes with widths rather than padded strings: Ink lays out each
+// <Text> as its own node and trims trailing whitespace, so padEnd survives only
+// until a value changes width and the columns drift apart.
+const TIME_WIDTH = 21
+const EVENT_WIDTH = 11
+const KIND_WIDTH = 5
+
 // Controlled, windowed list of account change events. Each row is
-// "<time>  <glyph> <label>  <kind>  <name>" — the glyph and label distinguish
+// "<time> <glyph> <label> <kind> <name>" — the glyph and label distinguish
 // created/modified/deleted without relying on the row colour.
 export const ChangesList = ({
   entries,
@@ -33,18 +40,24 @@ export const ChangesList = ({
         const meta = entry.metadata ?? {}
         return (
           <SelectableRow key={entry.diffid ?? idx} active={idx === selected}>
-            <Text wrap="truncate-end">
-              <Text color={colors.muted}>
-                {formatTimestamp(entry.time).padEnd(21)}
-              </Text>
-              <Text color={tone.color} bold>
-                {`${tone.glyph} ${tone.label}`.padEnd(11)}
-              </Text>
-              <Text color={colors.muted}>
-                {(isFolderEvent(entry.event) ? "dir" : "file").padEnd(6)}
-              </Text>
-              <Text>{meta.path ?? meta.name ?? "-"}</Text>
-            </Text>
+            <Box>
+              <Box width={TIME_WIDTH} flexShrink={0}>
+                <Text color={colors.muted}>{formatTimestamp(entry.time)}</Text>
+              </Box>
+              <Box width={EVENT_WIDTH} flexShrink={0}>
+                <Text color={tone.color} bold>
+                  {`${tone.glyph} ${tone.label}`}
+                </Text>
+              </Box>
+              <Box width={KIND_WIDTH} flexShrink={0}>
+                <Text color={colors.muted}>
+                  {isFolderEvent(entry.event) ? "dir" : "file"}
+                </Text>
+              </Box>
+              <Box flexGrow={1}>
+                <Text wrap="truncate-end">{meta.path ?? meta.name ?? "-"}</Text>
+              </Box>
+            </Box>
           </SelectableRow>
         )
       })}

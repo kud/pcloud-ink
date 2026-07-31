@@ -168,7 +168,6 @@ const FILES_PRIMARY: HintPair[] = [
 
 const FILES_SECONDARY: HintPair[] = [
   { key: "tab", label: "switch view" },
-  { key: "t", label: "view trash" },
   { key: "l", label: "copy link" },
   { key: "d", label: "delete → trash" },
   { key: "r", label: "reload" },
@@ -639,9 +638,11 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
     }
 
     if (key.tab) {
-      const next =
-        TABS[(TABS.findIndex((t) => t.value === mode) + 1) % TABS.length]
-      switchTo(next.value)
+      const at = TABS.findIndex((t) => t.value === mode)
+      // Adding length before the modulo keeps shift+tab from going negative on
+      // the first tab, where -1 % 3 is -1 rather than the last index.
+      const step = key.shift ? TABS.length - 1 : 1
+      switchTo(TABS[(at + step) % TABS.length].value)
       return
     }
 
@@ -676,11 +677,6 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
         return
       }
       if (key.return && selected?.isfolder) enterSelected()
-
-      if (input === "t") {
-        switchTo("trash")
-        return
-      }
 
       if (!selected) return
 
