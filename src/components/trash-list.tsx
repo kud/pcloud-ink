@@ -3,6 +3,7 @@ import { Box, Text } from "ink"
 import { SelectableRow, colors } from "@kud/ink-ui"
 import { formatBytes, type PCloudTrashItem } from "@kud/pcloud"
 import { windowSlice } from "../lib/window.js"
+import { fit } from "../lib/fit.js"
 
 export type TrashListProps = {
   items: (PCloudTrashItem & { folderid?: number })[]
@@ -51,14 +52,14 @@ export const TrashList = ({
           <SelectableRow key={trashId(item) + idx} active={idx === selected}>
             <Text wrap="truncate-end">
               <Text color={colors.muted}>
-                {(isFolder ? "dir" : "file").padEnd(6)}
+                {fit((isFolder ? "dir" : "file"), 6)}
               </Text>
-              <Text color={colors.muted}>{trashId(item).padEnd(13)}</Text>
+              <Text color={colors.muted}>{fit(trashId(item), 13)}</Text>
               <Text bold={isFolder}>
-                {`${item.name}${isFolder ? "/" : ""}`.padEnd(38)}
+                {fit(`${item.name}${isFolder ? "/" : ""}`, 38)}
               </Text>
               <Text color={colors.info}>
-                {(isFolder ? "-" : formatBytes(item.size ?? 0)).padEnd(12)}
+                {fit((isFolder ? "-" : formatBytes(item.size ?? 0)), 12)}
               </Text>
               <Text color={colors.muted}>{deletedOn(item)}</Text>
             </Text>

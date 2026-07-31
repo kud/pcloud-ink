@@ -3,6 +3,7 @@ import { Box, Text } from "ink"
 import { SelectableRow, colors } from "@kud/ink-ui"
 import { formatTimestamp, type PCloudShareItem } from "@kud/pcloud"
 import { windowSlice } from "../lib/window.js"
+import { fit } from "../lib/fit.js"
 
 export type ShareListProps = {
   shares: PCloudShareItem[]
@@ -56,13 +57,13 @@ export const ShareList = ({
               {/* shareid first, because it is the argument remove-share takes
                   and hunting for it in a trailing column is the common task. */}
               <Text color={colors.muted}>
-                {String(share.shareid ?? "-").padEnd(9)}
+                {fit(String(share.shareid ?? "-"), 9)}
               </Text>
               <Text bold>
-                {`${share.foldername ?? share.folderid}/`.padEnd(24)}
+                {fit(`${share.foldername ?? share.folderid}/`, 24)}
               </Text>
-              <Text color={colors.info}>{who.padEnd(30)}</Text>
-              <Text color={colors.muted}>{shareRights(share).padEnd(6)}</Text>
+              <Text color={colors.info}>{fit(who, 30)}</Text>
+              <Text color={colors.muted}>{fit(shareRights(share), 6)}</Text>
               <Text color={colors.muted}>{formatTimestamp(share.created)}</Text>
             </Text>
           </SelectableRow>

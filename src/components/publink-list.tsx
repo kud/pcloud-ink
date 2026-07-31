@@ -3,6 +3,7 @@ import { Box, Text } from "ink"
 import { SelectableRow, colors } from "@kud/ink-ui"
 import { formatTimestamp, type PCloudPublink } from "@kud/pcloud"
 import { windowSlice } from "../lib/window.js"
+import { fit } from "../lib/fit.js"
 
 export type PublinkListProps = {
   links: PCloudPublink[]
@@ -40,12 +41,12 @@ export const PublinkList = ({
         return (
           <SelectableRow key={link.code ?? idx} active={idx === selected}>
             <Text wrap="truncate-end">
-              <Text color={colors.muted}>{(link.code ?? "-").padEnd(20)}</Text>
+              <Text color={colors.muted}>{fit((link.code ?? "-"), 20)}</Text>
               <Text bold={isFolder}>
-                {`${link.name ?? "-"}${isFolder ? "/" : ""}`.padEnd(32)}
+                {fit(`${link.name ?? "-"}${isFolder ? "/" : ""}`, 32)}
               </Text>
               <Text color={colors.info}>
-                {String(link.downloads ?? 0).padEnd(11)}
+                {fit(String(link.downloads ?? 0), 11)}
               </Text>
               <Text color={colors.muted}>{publinkExpiry(link)}</Text>
             </Text>

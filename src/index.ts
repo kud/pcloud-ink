@@ -62,3 +62,4 @@ export {
   byNewest,
   type RevisionListProps,
 } from "./components/revision-list.js"
+export { fit } from "./lib/fit.js"

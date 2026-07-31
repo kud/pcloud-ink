@@ -7,6 +7,7 @@ import {
   type PCloudFolderItem,
 } from "@kud/pcloud"
 import { windowSlice } from "../lib/window.js"
+import { fit } from "../lib/fit.js"
 
 export type FileListProps = {
   items: PCloudFolderItem[]
@@ -53,13 +54,13 @@ export const FileList = ({
           >
             <Text wrap="truncate-end">
               <Text color={colors.muted}>
-                {(item.isfolder ? "dir" : "file").padEnd(6)}
+                {fit((item.isfolder ? "dir" : "file"), 6)}
               </Text>
               <Text bold={item.isfolder}>
-                {`${item.name}${item.isfolder ? "/" : ""}`.padEnd(40)}
+                {fit(`${item.name}${item.isfolder ? "/" : ""}`, 40)}
               </Text>
               <Text color={colors.info}>
-                {(item.isfolder ? "-" : formatBytes(item.size ?? 0)).padEnd(12)}
+                {fit((item.isfolder ? "-" : formatBytes(item.size ?? 0)), 12)}
               </Text>
               <Text color={colors.muted}>{formatTimestamp(item.modified)}</Text>
             </Text>

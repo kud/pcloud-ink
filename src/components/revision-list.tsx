@@ -3,6 +3,7 @@ import { Box, Text } from "ink"
 import { SelectableRow, colors } from "@kud/ink-ui"
 import { formatBytes, formatTimestamp, type PCloudRevision } from "@kud/pcloud"
 import { windowSlice } from "../lib/window.js"
+import { fit } from "../lib/fit.js"
 
 export type RevisionListProps = {
   revisions: PCloudRevision[]
@@ -42,15 +43,15 @@ export const RevisionList = ({
           <SelectableRow key={rev.revisionid ?? idx} active={idx === selected}>
             <Text wrap="truncate-end">
               <Text color={colors.muted}>
-                {String(rev.revisionid).padEnd(13)}
+                {fit(String(rev.revisionid), 13)}
               </Text>
               {/* The newest revision is the one immediately behind the current
                   file, which is what "revert" almost always means. */}
               <Text bold={idx === 0}>
-                {(idx === 0 ? "latest" : "").padEnd(9)}
+                {fit((idx === 0 ? "latest" : ""), 9)}
               </Text>
               <Text color={colors.info}>
-                {formatBytes(rev.size ?? 0).padEnd(13)}
+                {fit(formatBytes(rev.size ?? 0), 13)}
               </Text>
               <Text color={colors.muted}>
                 {formatTimestamp(rev.modified ?? rev.created)}
