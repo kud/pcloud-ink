@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react"
 import { Box, Text, useInput, useWindowSize } from "ink"
 import { Spinner, Tabs, type TabItem } from "@kud/ink-ui"
 import { ChangesList } from "./components/changes-list.js"
+import { ShareList, shareRights } from "./components/share-list.js"
 import { isFolderEvent } from "./lib/event.js"
 import {
   buildRows,
@@ -24,6 +25,7 @@ import {
   PCloudFolderItem,
   PCloudTrashItem,
   PCloudDiffEntry,
+  PCloudShareItem,
   resolveStoredAuth,
   planRewind,
   applyRewind,
@@ -38,7 +40,7 @@ type Phase =
   | "result"
   | "imagePreviewing"
   | "actions"
-type Mode = "files" | "trash" | "rewind"
+type Mode = "files" | "trash" | "rewind" | "shares"
 
 const parentPath = (path: string): string => {
   if (path === "/") return "/"
@@ -112,6 +114,7 @@ const TABS: TabItem<Mode>[] = [
   { value: "files", label: "Files" },
   { value: "rewind", label: "Rewind" },
   { value: "trash", label: "Trash" },
+  { value: "shares", label: "Shares" },
 ]
 
 const Header = ({ path, mode }: { path: string; mode: Mode }) => {
@@ -218,6 +221,12 @@ const REWIND_SECONDARY: HintPair[] = [
   { key: "q", label: "quit" },
 ]
 
+const SHARES_SECONDARY: HintPair[] = [
+  { key: "tab", label: "switch view" },
+  { key: "r", label: "reload" },
+  { key: "q", label: "quit" },
+]
+
 const Footer = ({ count, mode }: { count: number; mode: Mode }) => {
   const primary =
     mode === "files"
@@ -230,7 +239,9 @@ const Footer = ({ count, mode }: { count: number; mode: Mode }) => {
       ? FILES_SECONDARY
       : mode === "rewind"
         ? REWIND_SECONDARY
-        : SECONDARY_SECONDARY
+        : mode === "shares"
+          ? SHARES_SECONDARY
+          : SECONDARY_SECONDARY
   return (
     <Box
       flexDirection="column"
@@ -257,9 +268,12 @@ const Footer = ({ count, mode }: { count: number; mode: Mode }) => {
 const ItemRow = ({
   item,
   selected,
+  shared,
 }: {
   item: PCloudFolderItem
   selected: boolean
+  /** Which way a folder is shared, if it is. */
+  shared?: "out" | "in"
 }) => {
   const indicator = selected ? "\u276F" : " "
   const icon = item.isfolder ? FOLDER_ICON : FILE_ICON
@@ -280,6 +294,14 @@ const ItemRow = ({
       <Text bold={selected} color="white">
         {item.name}
       </Text>
+      {/* An arrow, not a colour: which direction a folder is shared is the
+          whole point, and "shared" alone leaves you guessing whether you gave
+          access or were given it. */}
+      {shared && (
+        <Text color="magenta">
+          {shared === "out" ? "  → shared" : "  ← shared"}
+        </Text>
+      )}
       <Box flexGrow={1} />
       <Text dimColor color={item.isfolder ? "white" : "cyan"}>
         {sizeLabel}
@@ -516,6 +538,68 @@ const RunPreview = ({
   </Box>
 )
 
+const SharePreview = ({
+  share,
+  direction,
+}: {
+  share: PCloudShareItem | undefined
+  direction: "outgoing" | "incoming"
+}) => (
+  <Box
+    flexBasis="45%"
+    flexDirection="column"
+    borderLeft={true}
+    borderStyle="single"
+    borderColor="gray"
+    paddingX={1}
+  >
+    {share === undefined ? (
+      <Text color="gray">No selection</Text>
+    ) : (
+      <>
+        <Text color="white" bold wrap="truncate-start">
+          {share.foldername ?? String(share.folderid)}
+        </Text>
+        <Box marginTop={1}>
+          <Text color={direction === "outgoing" ? "magenta" : "cyan"} bold>
+            {direction === "outgoing" ? "SHARED OUT" : "SHARED IN"}
+          </Text>
+        </Box>
+        <Text dimColor color="white" wrap="truncate-start">
+          {direction === "outgoing"
+            ? (share.tomail ?? "-")
+            : (share.frommail ?? "-")}
+        </Text>
+        <Box marginTop={1} flexDirection="column">
+          {/* Spelled out rather than left as rwcd: this panel has the room,
+              and "can delete" is worth reading before revoking or trusting. */}
+          <Text dimColor color="white">
+            {`${share.canread ? "✓" : "·"} read`}
+          </Text>
+          <Text dimColor color="white">
+            {`${share.canmodify ? "✓" : "·"} modify`}
+          </Text>
+          <Text dimColor color="white">
+            {`${share.cancreate ? "✓" : "·"} create`}
+          </Text>
+          <Text dimColor color="white">
+            {`${share.candelete ? "✓" : "·"} delete`}
+          </Text>
+        </Box>
+        <Box marginTop={1}>
+          <Text color="gray">{`share id ${share.shareid}`}</Text>
+        </Box>
+        <Text color="gray">{"────────────────"}</Text>
+        <Text color="gray">
+          {direction === "outgoing"
+            ? "enter to stop sharing"
+            : "shared with you — nothing to revoke"}
+        </Text>
+      </>
+    )}
+  </Box>
+)
+
 const ImagePreview = ({
   imagePath,
   onExit,
@@ -560,6 +644,13 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   const [resultIsError, setResultIsError] = useState(false)
   const [trashItems, setTrashItems] = useState<PCloudTrashItem[]>([])
   const [changes, setChanges] = useState<PCloudDiffEntry[]>([])
+  const [outgoing, setOutgoing] = useState<PCloudShareItem[]>([])
+  const [incoming, setIncoming] = useState<PCloudShareItem[]>([])
+  // folderid → direction, so the Files list can mark a shared folder without
+  // asking about each row. One listshares call answers for the whole tree.
+  const [sharedFolders, setSharedFolders] = useState<
+    ReadonlyMap<number, "out" | "in">
+  >(new Map())
   const [expandedRuns, setExpandedRuns] = useState<ReadonlySet<string>>(
     new Set(),
   )
@@ -713,6 +804,27 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       .catch(() => {})
   }
 
+  // Loaded once and reused by both the Shares tab and the Files marker rather
+  // than fetched per view: the answer is account-wide and does not change
+  // while you walk the tree.
+  const loadShares = () => {
+    api
+      .listShares()
+      .then((response) => {
+        const out = response.shares?.outgoing ?? []
+        const inc = response.shares?.incoming ?? []
+        setOutgoing(out)
+        setIncoming(inc)
+        setSharedFolders(
+          new Map([
+            ...out.map((s) => [s.folderid, "out"] as const),
+            ...inc.map((s) => [s.folderid, "in"] as const),
+          ]),
+        )
+      })
+      .catch(() => {})
+  }
+
   const loadChanges = () => {
     setPhase("loading")
     api
@@ -739,6 +851,10 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
     if (next === "files") loadFiles(path)
     if (next === "trash") loadTrash()
     if (next === "rewind") loadChanges()
+    if (next === "shares") {
+      loadShares()
+      setPhase("browsing")
+    }
   }
 
   const loadTrash = () => {
@@ -772,6 +888,10 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   useEffect(() => {
     loadFiles(path)
   }, [path])
+
+  useEffect(() => {
+    loadShares()
+  }, [])
 
   const enterSelected = () => {
     const selected = items[cursor]
@@ -867,6 +987,20 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   // A single deleted file restores cleanly and a single edit reverts cleanly —
   // it is only undoing *part* of a bulk change that gets incoherent, and that
   // is what `pcloud rewind` is for. Per-row recovery here is well defined.
+  const stopSharing = (share: PCloudShareItem) => {
+    triggerConfirm(
+      `Stop sharing "${share.foldername ?? share.folderid}" with ${share.tomail ?? "the recipient"}?`,
+      async () => {
+        // shareid, not sharerequestid — removeshare ends an accepted share,
+        // and sending the wrong id fails with a message about the other one.
+        const res = await api.removeShare(share.shareid)
+        if (res.result !== 0) throw new Error(res.error ?? "Could not stop sharing")
+        showResult(`✓ Stopped sharing "${share.foldername ?? share.folderid}"`)
+        loadShares()
+      },
+    )
+  }
+
   const runRecovery = (entry: PCloudDiffEntry, recovery: RewindRecovery) => {
     const label = entry.metadata?.name ?? "item"
 
@@ -975,6 +1109,22 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
           label: `Restore "${selected.name}"`,
           detail: "Puts it back where it was before it was deleted.",
           run: () => restoreTrashItem(trashed),
+        },
+      ]
+    }
+
+    if (mode === "shares") {
+      const share = selectedShare
+      if (!share) return []
+      // Outgoing only: removeshare ends a share you granted. Leaving one you
+      // were given is declineshare, on a sharerequestid you no longer have
+      // once it has been accepted.
+      if (cursor >= outgoing.length) return []
+      return [
+        {
+          label: `Stop sharing "${share.foldername ?? share.folderid}"`,
+          detail: `Revokes access for ${share.tomail ?? "the recipient"}. The folder itself is untouched.`,
+          run: () => stopSharing(share),
         },
       ]
     }
@@ -1153,6 +1303,14 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       return
     }
 
+    if (mode === "shares") {
+      const total = outgoing.length + incoming.length
+      if (key.downArrow) setCursor((c) => Math.min(total - 1, c + 1))
+      if (key.upArrow) setCursor((c) => Math.max(0, c - 1))
+      if (input === "r") loadShares()
+      return
+    }
+
     // Rewind lists day headings and folded runs rather than files, so the
     // cursor moves over rows — skipping the headings — and none of the file or
     // trash actions below apply to it.
@@ -1325,12 +1483,13 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   // unconditionally costs two lines on a list that already fits, which beats
   // the self-referential alternative where the window size depends on whether
   // the window overflows.
-  const SCROLL_MARKER_ROWS = mode === "rewind" ? 0 : 2
+  const SCROLL_MARKER_ROWS = mode === "rewind" || mode === "shares" ? 0 : 2
   const visibleCount = Math.max(
     1,
     terminalRows - CHROME_ROWS - overlayRows - SCROLL_MARKER_ROWS,
   )
   const selectedRow = rewindRows[cursor]
+  const selectedShare = [...outgoing, ...incoming][cursor]
   const windowStart = Math.min(
     Math.max(0, cursor - Math.floor(visibleCount / 2)),
     Math.max(0, items.length - visibleCount),
@@ -1360,6 +1519,40 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
                   phase === "executing" ? "Executing\u2026" : "Loading\u2026"
                 }
               />
+            </Box>
+          ) : mode === "shares" ? (
+            <Box paddingX={1} flexDirection="column">
+              {outgoing.length > 0 && (
+                <>
+                  <Text bold color="white">
+                    Shared with others
+                  </Text>
+                  <ShareList
+                    shares={outgoing}
+                    direction="outgoing"
+                    selected={cursor}
+                    rows={outgoing.length}
+                  />
+                </>
+              )}
+              {incoming.length > 0 && (
+                <Box flexDirection="column" marginTop={outgoing.length ? 1 : 0}>
+                  <Text bold color="white">
+                    Shared with you
+                  </Text>
+                  <ShareList
+                    shares={incoming}
+                    direction="incoming"
+                    selected={cursor - outgoing.length}
+                    rows={incoming.length}
+                  />
+                </Box>
+              )}
+              {outgoing.length === 0 && incoming.length === 0 && (
+                <Text dimColor color="white">
+                  Nothing shared
+                </Text>
+              )}
             </Box>
           ) : mode === "rewind" ? (
             <Box paddingX={1}>
@@ -1396,6 +1589,11 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
                   key={`${item.name}-${windowStart + i}`}
                   item={item}
                   selected={windowStart + i === cursor}
+                  shared={
+                    item.folderid === undefined
+                      ? undefined
+                      : sharedFolders.get(item.folderid)
+                  }
                 />
               ))}
               {belowCount > 0 && (
@@ -1408,7 +1606,12 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
             </>
           )}
         </Box>
-        {mode === "rewind" ? (
+        {mode === "shares" ? (
+          <SharePreview
+            share={selectedShare}
+            direction={cursor < outgoing.length ? "outgoing" : "incoming"}
+          />
+        ) : mode === "rewind" ? (
           <RunPreview
             run={selectedRow?.kind === "day" ? undefined : selectedRow?.run}
             entry={
