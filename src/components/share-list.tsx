@@ -56,12 +56,12 @@ export const ShareList = ({
               {/* shareid first, because it is the argument remove-share takes
                   and hunting for it in a trailing column is the common task. */}
               <Text color={colors.muted}>
-                {String(share.shareid ?? "-").padEnd(10)}
+                {String(share.shareid ?? "-").padEnd(9)}
               </Text>
               <Text bold>
-                {`${share.foldername ?? share.folderid}/`.padEnd(28)}
+                {`${share.foldername ?? share.folderid}/`.padEnd(24)}
               </Text>
-              <Text color={colors.info}>{who.padEnd(34)}</Text>
+              <Text color={colors.info}>{who.padEnd(30)}</Text>
               <Text color={colors.muted}>{shareRights(share).padEnd(6)}</Text>
               <Text color={colors.muted}>{formatTimestamp(share.created)}</Text>
             </Text>
