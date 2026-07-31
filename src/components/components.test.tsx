@@ -5,10 +5,12 @@ import type {
   PCloudDiffEntry,
   PCloudFolderItem,
   PCloudUserInfo,
+  PCloudShareItem,
 } from "@kud/pcloud"
 import { FileList, sortItems } from "./file-list.js"
 import { ChangesList } from "./changes-list.js"
 import { AccountPanel } from "./account-panel.js"
+import { ShareList, shareRights } from "./share-list.js"
 
 const items: PCloudFolderItem[] = [
   {
@@ -121,4 +123,46 @@ test("AccountPanel does not divide by zero on an unknown quota", () => {
   }
   const { lastFrame } = render(<AccountPanel user={user} />)
   expect(lastFrame() ?? "").toContain("0%")
+})
+
+const shares = [
+  {
+    shareid: 225308,
+    folderid: 1,
+    foldername: "Lib",
+    tomail: "someone@example.com",
+    canread: true,
+    canmodify: true,
+    cancreate: false,
+    candelete: false,
+    created: "Sun, 09 Oct 2022 22:19:32 +0000",
+  },
+] as never as PCloudShareItem[]
+
+// Positional, not a list of what was granted: "rw--" and "r--d" both grant two
+// rights, and a comma-separated summary cannot tell them apart at a glance.
+test("shareRights renders every right in a fixed position", () => {
+  expect(shareRights(shares[0])).toBe("rw--")
+  expect(shareRights({ canread: true, candelete: true } as never)).toBe("r--d")
+  expect(shareRights({} as never)).toBe("----")
+})
+
+test("ShareList leads with the share id, which is what remove-share takes", () => {
+  const { lastFrame } = render(<ShareList shares={shares} rows={10} />)
+  const line = (lastFrame() ?? "").split("\n").find((l) => l.includes("Lib"))
+  expect(line?.trimStart().startsWith("225308")).toBe(true)
+})
+
+test("ShareList names the counterparty by direction", () => {
+  const out = render(<ShareList shares={shares} rows={10} direction="outgoing" />)
+  expect(out.lastFrame() ?? "").toContain("someone@example.com")
+
+  const incoming = [{ ...shares[0], tomail: undefined, frommail: "owner@example.com" }] as never
+  const inc = render(<ShareList shares={incoming} rows={10} direction="incoming" />)
+  expect(inc.lastFrame() ?? "").toContain("owner@example.com")
+})
+
+test("ShareList shows the empty state", () => {
+  const { lastFrame } = render(<ShareList shares={[]} rows={10} />)
+  expect(lastFrame() ?? "").toContain("No shares")
 })

@@ -41,3 +41,8 @@ export {
   type EventRun,
   type RewindRow,
 } from "./lib/rewind-rows.js"
+export {
+  ShareList,
+  shareRights,
+  type ShareListProps,
+} from "./components/share-list.js"
