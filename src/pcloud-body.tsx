@@ -697,7 +697,14 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
         const trashItem = trashItems[cursor]
         if (!trashItem) return
         runAction(async () => {
-          const res = await api.restoreFromTrash(trashItem.fileid)
+          // Trash is mostly folders — a folder deletion is what fills it — and
+          // those carry folderid, not fileid. Restoring by fileid alone worked
+          // only on a loose file at the root, the rarer case by far.
+          const item = trashItem as typeof trashItem & { folderid?: number }
+          const res =
+            item.folderid !== undefined
+              ? await api.restoreFolderFromTrash(item.folderid)
+              : await api.restoreFromTrash(item.fileid)
           if (res.result === 1000)
             throw new Error(
               "⚠ Trash requires a session token — not supported with OAuth access tokens.",
@@ -730,8 +737,11 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
     )
   }
 
+  // Claiming the full terminal height is what pins the footer to the bottom:
+  // without an explicit height the column shrinks to its content, so the hints
+  // float directly under the last row rather than sitting at the screen edge.
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" height={terminalRows}>
       <Header path={path} mode={mode} />
       <Box flexDirection="row" flexGrow={1} marginTop={1}>
         <Box flexDirection="column" flexGrow={1}>
