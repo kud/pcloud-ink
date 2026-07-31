@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react"
 import { Box, Text, useInput, useWindowSize } from "ink"
-import { Spinner } from "@kud/ink-ui"
+import { Spinner, Tabs, type TabItem } from "@kud/ink-ui"
+import { ChangesList } from "./components/changes-list.js"
 import Image, { TerminalInfoProvider } from "ink-picture"
 import open from "open"
 import { execFileSync } from "child_process"
@@ -9,6 +10,7 @@ import {
   PCloudAPI,
   PCloudFolderItem,
   PCloudTrashItem,
+  PCloudDiffEntry,
   resolveStoredAuth,
 } from "@kud/pcloud"
 
@@ -19,7 +21,7 @@ type Phase =
   | "executing"
   | "result"
   | "imagePreviewing"
-type Mode = "files" | "trash"
+type Mode = "files" | "trash" | "rewind"
 
 const parentPath = (path: string): string => {
   if (path === "/") return "/"
@@ -86,42 +88,45 @@ const breadcrumbSegments = (
   ]
 }
 
-const Header = ({ path, mode }: { path: string; mode: Mode }) => {
-  if (mode === "trash") {
-    return (
-      <Box backgroundColor="red" paddingX={1} width="100%">
-        <Text color="white" bold>
-          {" "}
-          \uD83D\uDDD1 Trash
-        </Text>
-      </Box>
-    )
-  }
+// Live storage above, recovery below — the same split pCloud's own sidebar
+// makes, since the Rewind and Trash views show things that are not in the tree
+// any more and so have no breadcrumb to speak of.
+const TABS: TabItem<Mode>[] = [
+  { value: "files", label: "Files" },
+  { value: "rewind", label: "Rewind" },
+  { value: "trash", label: "Trash" },
+]
 
+const Header = ({ path, mode }: { path: string; mode: Mode }) => {
   const segments = breadcrumbSegments(path)
   return (
-    <Box paddingX={1} width="100%">
-      {segments.map((seg, i) => (
-        <React.Fragment key={i}>
-          {i === 0 ? (
-            <Text color="cyan" dimColor>
-              {seg.label}{" "}
-            </Text>
-          ) : (
-            <>
-              {i > 1 && (
-                <Text color="white" dimColor>
-                  {" "}
-                  /{" "}
-                </Text>
-              )}
-              <Text color="white" bold={seg.last} dimColor={!seg.last}>
-                {seg.label}
-              </Text>
-            </>
-          )}
-        </React.Fragment>
-      ))}
+    <Box flexDirection="column" paddingX={1} width="100%">
+      <Tabs active={mode} items={TABS} />
+      <Box marginTop={1}>
+        {mode !== "files"
+          ? null
+          : segments.map((seg, i) => (
+              <React.Fragment key={i}>
+                {i === 0 ? (
+                  <Text color="cyan" dimColor>
+                    {seg.label}{" "}
+                  </Text>
+                ) : (
+                  <>
+                    {i > 1 && (
+                      <Text color="white" dimColor>
+                        {" "}
+                        /{" "}
+                      </Text>
+                    )}
+                    <Text color="white" bold={seg.last} dimColor={!seg.last}>
+                      {seg.label}
+                    </Text>
+                  </>
+                )}
+              </React.Fragment>
+            ))}
+      </Box>
     </Box>
   )
 }
@@ -162,6 +167,7 @@ const FILES_PRIMARY: HintPair[] = [
 ]
 
 const FILES_SECONDARY: HintPair[] = [
+  { key: "tab", label: "switch view" },
   { key: "t", label: "view trash" },
   { key: "l", label: "copy link" },
   { key: "d", label: "delete → trash" },
@@ -175,13 +181,28 @@ const SECONDARY_PRIMARY: HintPair[] = [
 ]
 
 const SECONDARY_SECONDARY: HintPair[] = [
+  { key: "tab", label: "switch view" },
   { key: "r", label: "restore from trash" },
+  { key: "q", label: "quit" },
+]
+
+// Rewind is read-only: it reports what changed, and `pcloud rewind` is what
+// acts on it. Offering a restore key here would imply a per-row undo that the
+// view cannot honour, since undoing one event in isolation is rarely coherent.
+const REWIND_SECONDARY: HintPair[] = [
+  { key: "tab", label: "switch view" },
+  { key: "r", label: "reload" },
   { key: "q", label: "quit" },
 ]
 
 const Footer = ({ count, mode }: { count: number; mode: Mode }) => {
   const primary = mode === "files" ? FILES_PRIMARY : SECONDARY_PRIMARY
-  const secondary = mode === "files" ? FILES_SECONDARY : SECONDARY_SECONDARY
+  const secondary =
+    mode === "files"
+      ? FILES_SECONDARY
+      : mode === "rewind"
+        ? REWIND_SECONDARY
+        : SECONDARY_SECONDARY
   return (
     <Box
       flexDirection="column"
@@ -270,9 +291,7 @@ const Preview = ({
       paddingX={1}
     >
       {item === undefined ? (
-        <Text color="gray">
-          No selection
-        </Text>
+        <Text color="gray">No selection</Text>
       ) : (
         <>
           {imageUrl && (
@@ -320,18 +339,14 @@ const Preview = ({
             {formatDate(item.modified)}
           </Text>
           <Box>
-            <Text color="gray">
-              {"id "}
-            </Text>
+            <Text color="gray">{"id "}</Text>
             <Text color="gray">
               {item.isfolder
                 ? String(item.folderid ?? "")
                 : String(item.fileid ?? "")}
             </Text>
           </Box>
-          <Text color="gray">
-            ────────────────
-          </Text>
+          <Text color="gray">────────────────</Text>
           <Text color="gray">
             {item.isfolder ? "\u2192 enter to open" : "enter to open"}
           </Text>
@@ -383,6 +398,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   const [resultMessage, setResultMessage] = useState("")
   const [resultIsError, setResultIsError] = useState(false)
   const [trashItems, setTrashItems] = useState<PCloudTrashItem[]>([])
+  const [changes, setChanges] = useState<PCloudDiffEntry[]>([])
   const api = React.useMemo(() => buildAPI(), [])
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null)
   const [previewImageItem, setPreviewImageItem] = useState<string | null>(null)
@@ -500,6 +516,30 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       })
   }
 
+  const loadChanges = () => {
+    setPhase("loading")
+    api
+      .diff({ last: 200 })
+      .then((response) => {
+        setChanges((response.entries ?? []).slice().reverse())
+        setCursor(0)
+        setPhase("browsing")
+      })
+      .catch((error: unknown) => {
+        showResult(error instanceof Error ? error.message : String(error), true)
+      })
+  }
+
+  // Each view owns what it loads, so switching never leaves the previous view's
+  // rows on screen under a new tab's heading.
+  const switchTo = (next: Mode) => {
+    setMode(next)
+    setCursor(0)
+    if (next === "files") loadFiles(path)
+    if (next === "trash") loadTrash()
+    if (next === "rewind") loadChanges()
+  }
+
   const loadTrash = () => {
     setPhase("loading")
     api
@@ -587,6 +627,23 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       onExit()
       return
     }
+
+    if (key.tab) {
+      const next =
+        TABS[(TABS.findIndex((t) => t.value === mode) + 1) % TABS.length]
+      switchTo(next.value)
+      return
+    }
+
+    // Rewind lists change events rather than files, so the cursor is bounded by
+    // that list and none of the file or trash actions below apply to it.
+    if (mode === "rewind") {
+      if (key.downArrow) setCursor((c) => Math.min(changes.length - 1, c + 1))
+      if (key.upArrow) setCursor((c) => Math.max(0, c - 1))
+      if (input === "r") loadChanges()
+      return
+    }
+
     if (key.downArrow) setCursor((c) => Math.min(items.length - 1, c + 1))
     if (key.upArrow) setCursor((c) => Math.max(0, c - 1))
 
@@ -611,8 +668,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       if (key.return && selected?.isfolder) enterSelected()
 
       if (input === "t") {
-        setMode("trash")
-        loadTrash()
+        switchTo("trash")
         return
       }
 
@@ -749,7 +805,16 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       <Header path={path} mode={mode} />
       <Box flexDirection="row" flexGrow={1} marginTop={1}>
         <Box flexDirection="column" flexGrow={1}>
-          {items.length === 0 ? (
+          {mode === "rewind" ? (
+            <Box paddingX={1}>
+              <ChangesList
+                entries={changes}
+                selected={cursor}
+                rows={Math.max(1, terminalRows - 8)}
+                emptyText="No recent changes"
+              />
+            </Box>
+          ) : items.length === 0 ? (
             <Box justifyContent="center">
               <Text dimColor color="white">
                 {"  Empty"}
@@ -824,7 +889,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
           </Text>
         </Box>
       )}
-      <Footer count={items.length} mode={mode} />
+      <Footer count={mode === "rewind" ? changes.length : items.length} mode={mode} />
     </Box>
   )
 }
