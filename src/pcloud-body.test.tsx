@@ -6,11 +6,11 @@ import { trashItemToRow } from "./pcloud-body.js"
 // view on the first folder it met, which is the common case.
 test("a trashed folder without a deletetime does not throw", () => {
   const row = trashItemToRow({
-    folderid: 25673131029,
-    name: "claude-personal",
+    folderid: 1234567890,
+    name: "documents",
   } as never)
 
-  expect(row.name).toBe("claude-personal")
+  expect(row.name).toBe("documents")
   expect(row.isfolder).toBe(true)
   expect(row.modified).toBeUndefined()
 })

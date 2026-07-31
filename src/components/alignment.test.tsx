@@ -1,14 +1,23 @@
 import React from "react"
 import { test, expect } from "vitest"
+import { Box } from "ink"
 import { render } from "ink-testing-library"
 import { ChangesList } from "./changes-list.js"
 
-// Padding with padEnd inside separate <Text> nodes looked aligned until a value
-// changed width — Ink lays each out as its own box and trims trailing space. The
-// guarantee worth pinning is the one that broke: rows whose event and kind
-// differ in length still start their name at the same column.
-test("names line up regardless of event or kind width", () => {
-  const names = ["claude-personal", "CLAUDE.md", "usage.tsv", "new.md"]
+// The first version of this test used only short names and passed while the bug
+// survived: a row long enough to overflow its container compresses the fixed
+// columns, so misalignment appeared only on long paths — which a real change log
+// is full of. The narrow wrapper is what forces that overflow; without it the
+// default width is roomy enough that nothing ever has to shrink.
+const WIDTH = 60
+
+test("names line up even when a path overflows the row", () => {
+  const names = [
+    "deeply/nested/directory/with/a/rather/long/path/name.txt",
+    "notes.md",
+    "another/quite/long/directory/path/that/will/not/fit.json",
+    "README.md",
+  ]
   const events = ["deletefolder", "deletefile", "modifyfile", "createfile"]
 
   const entries = names.map((name, i) => ({
@@ -18,12 +27,17 @@ test("names line up regardless of event or kind width", () => {
     metadata: { name, fileid: i },
   })) as never
 
-  const { lastFrame } = render(<ChangesList entries={entries} rows={10} />)
+  const { lastFrame } = render(
+    <Box width={WIDTH}>
+      <ChangesList entries={entries} rows={10} />
+    </Box>,
+  )
   const lines = (lastFrame() ?? "").split("\n").filter(Boolean)
 
   expect(lines).toHaveLength(names.length)
 
-  const columns = lines.map((line, i) => line.indexOf(names[i]))
-  expect(columns.every((c) => c > 0)).toBe(true)
+  // Long names truncate, so match on a prefix that survives truncation.
+  const columns = lines.map((line, i) => line.indexOf(names[i].slice(0, 6)))
+  expect(columns.every((column) => column > 0)).toBe(true)
   expect(new Set(columns).size).toBe(1)
 })

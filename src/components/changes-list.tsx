@@ -40,7 +40,11 @@ export const ChangesList = ({
         const meta = entry.metadata ?? {}
         return (
           <SelectableRow key={entry.diffid ?? idx} active={idx === selected}>
-            <Box>
+            {/* width="100%" plus a name column allowed to shrink to nothing is
+                what stops a long path squeezing the fixed columns: an
+                overflowing row compresses them regardless of flexShrink, so
+                only rows with long names came out misaligned. */}
+            <Box width="100%">
               <Box width={TIME_WIDTH} flexShrink={0}>
                 <Text color={colors.muted}>{formatTimestamp(entry.time)}</Text>
               </Box>
@@ -54,7 +58,7 @@ export const ChangesList = ({
                   {isFolderEvent(entry.event) ? "dir" : "file"}
                 </Text>
               </Box>
-              <Box flexGrow={1}>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 <Text wrap="truncate-end">{meta.path ?? meta.name ?? "-"}</Text>
               </Box>
             </Box>
