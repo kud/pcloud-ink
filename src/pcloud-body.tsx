@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react"
 import { Box, Text, useInput, useWindowSize } from "ink"
 import { Spinner, Tabs, type TabItem } from "@kud/ink-ui"
 import { ChangesList } from "./components/changes-list.js"
+import { isFolderEvent } from "./lib/event.js"
 import Image, { TerminalInfoProvider } from "ink-picture"
 import open from "open"
 import { execFileSync } from "child_process"
@@ -12,6 +13,8 @@ import {
   PCloudTrashItem,
   PCloudDiffEntry,
   resolveStoredAuth,
+  planRewind,
+  applyRewind,
 } from "@kud/pcloud"
 
 type Phase =
@@ -280,6 +283,61 @@ export const trashItemToRow = (
     : undefined,
 })
 
+// What a change event can be undone with, if anything. A deleted folder is
+// restored by folderid and a deleted file by fileid — the same split the Trash
+// view already learnt — and an edit reverts to a revision. Deriving it once
+// keeps the action offered and the call made from disagreeing about which id
+// matters, which is how folder deletions came to offer no action at all.
+export type RewindRecovery =
+  | { kind: "restoreFolder"; folderid: number }
+  | { kind: "restoreFile"; fileid: number }
+  | { kind: "revert"; fileid: number }
+
+export const recoveryFor = (
+  entry: PCloudDiffEntry,
+): RewindRecovery | undefined => {
+  const meta = entry.metadata
+  if (!meta) return undefined
+
+  if (entry.event.startsWith("delete")) {
+    if (isFolderEvent(entry.event))
+      return meta.folderid === undefined
+        ? undefined
+        : { kind: "restoreFolder", folderid: meta.folderid }
+    return meta.fileid === undefined
+      ? undefined
+      : { kind: "restoreFile", fileid: meta.fileid }
+  }
+
+  if (entry.event === "modifyfile" && meta.fileid !== undefined)
+    return { kind: "revert", fileid: meta.fileid }
+
+  // A creation has no inverse that is not itself a deletion, so it is listed
+  // and never acted on.
+  return undefined
+}
+
+// The Rewind list holds change events while the preview panel speaks
+// PCloudFolderItem. Without this mapping the panel kept showing whatever was
+// selected in Files before the tab switch, since nothing clears that list.
+export const changeItemToRow = (
+  entry: PCloudDiffEntry,
+): PCloudFolderItem | undefined => {
+  const meta = entry.metadata
+  if (!meta) return undefined
+  const at = new Date(entry.time)
+  return {
+    fileid: meta.fileid,
+    folderid: meta.folderid,
+    name: meta.path ?? meta.name ?? "-",
+    isfolder: isFolderEvent(entry.event),
+    size: meta.size,
+    modified: Number.isNaN(at.getTime())
+      ? undefined
+      : at.toISOString().slice(0, 10),
+  }
+}
+
 const MD_EXTS = new Set(["md", "mdx", "markdown"])
 const isMarkdownFile = (name: string): boolean =>
   MD_EXTS.has(name.split(".").pop()?.toLowerCase() ?? "")
@@ -288,10 +346,12 @@ const Preview = ({
   item,
   imageUrl,
   markdownLines,
+  hint,
 }: {
   item: PCloudFolderItem | undefined
   imageUrl?: string
   markdownLines?: string[]
+  hint?: string
 }) => {
   const { columns = 80, rows = 24 } = useWindowSize()
   const panelWidth = Math.max(10, Math.floor(columns * 0.45) - 4)
@@ -310,15 +370,21 @@ const Preview = ({
         <Text color="gray">No selection</Text>
       ) : (
         <>
+          {/* Width and container height are bounds, not a size. Given both
+              props, ink-picture takes a branch that returns the box verbatim
+              and never reads originalAspectRatio, so a landscape screenshot
+              was squeezed into the panel's portrait shape. Width alone lets it
+              derive the height and clamp against the box.
+
+              Protocol is left to auto-detection rather than pinned to
+              halfBlock: on a terminal with native image support that yields a
+              real image at true aspect, and halfBlock is what auto-detection
+              falls back to anyway. Pinning it cost us both quality and the
+              cell-size correction, since halfBlock assumes a 1:2 cell while
+              the iTerm2 path asks the terminal for its actual cell pixels. */}
           {imageUrl && (
             <Box height={imageHeight} flexDirection="column">
-              <Image
-                src={imageUrl}
-                width={panelWidth}
-                height={imageHeight}
-                protocol="halfBlock"
-                alt="loading…"
-              />
+              <Image src={imageUrl} width={panelWidth} alt="loading…" />
             </Box>
           )}
           {markdownLines && markdownLines.length > 0 && (
@@ -364,7 +430,7 @@ const Preview = ({
           </Box>
           <Text color="gray">────────────────</Text>
           <Text color="gray">
-            {item.isfolder ? "\u2192 enter to open" : "enter to open"}
+            {hint ?? (item.isfolder ? "\u2192 enter to open" : "enter to open")}
           </Text>
         </>
       )}
@@ -661,28 +727,91 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   // A single deleted file restores cleanly and a single edit reverts cleanly —
   // it is only undoing *part* of a bulk change that gets incoherent, and that
   // is what `pcloud rewind` is for. Per-row recovery here is well defined.
-  const restoreChange = (entry: PCloudDiffEntry) => {
-    const fileid = entry.metadata?.fileid
-    if (fileid === undefined) return
+  const runRecovery = (entry: PCloudDiffEntry, recovery: RewindRecovery) => {
+    const label = entry.metadata?.name ?? "item"
+
+    if (recovery.kind === "revert") {
+      runAction(async () => {
+        const revisions = await api.listRevisions(recovery.fileid)
+        if (revisions.result !== 0)
+          throw new Error(revisions.error ?? "Could not list revisions")
+        // pCloud promises no order here, and reverting to whichever revision
+        // happened to arrive first undoes far more than the last edit. The
+        // highest revisionid is the one immediately behind the current file.
+        const previous = (revisions.revisions ?? [])
+          .slice()
+          .sort((a, b) => b.revisionid - a.revisionid)[0]
+        if (!previous) throw new Error("No earlier revision to revert to")
+        const res = await api.revertRevision(
+          recovery.fileid,
+          previous.revisionid,
+        )
+        if (res.result !== 0) throw new Error(res.error ?? "Revert failed")
+        showResult(
+          `\u2713 Reverted "${label}" to revision ${previous.revisionid}`,
+        )
+      })
+      return
+    }
+
     runAction(async () => {
-      const res = await api.restoreFromTrash(fileid)
+      const res =
+        recovery.kind === "restoreFolder"
+          ? await api.restoreFolderFromTrash(recovery.folderid)
+          : await api.restoreFromTrash(recovery.fileid)
+      if (res.result === 1000)
+        throw new Error(
+          "\u26a0 Trash requires a session token \u2014 not supported with OAuth access tokens.",
+        )
       if (res.result !== 0) throw new Error(res.error ?? "Restore failed")
-      showResult(`\u2713 Restored "${entry.metadata?.name ?? fileid}"`)
+      showResult(`\u2713 Restored "${label}"`)
     })
   }
 
-  const revertChange = (entry: PCloudDiffEntry) => {
-    const fileid = entry.metadata?.fileid
-    if (fileid === undefined) return
+  // The bulk undo the Rewind tab was named after. Planning is a separate step
+  // from applying so the confirmation can state how much is about to move —
+  // "rewind" with no count is a blank cheque, and the CLI has always shown one.
+  const rewindTo = (entry: PCloudDiffEntry) => {
     runAction(async () => {
-      const revisions = await api.listRevisions(fileid)
-      if (revisions.result !== 0)
-        throw new Error(revisions.error ?? "Could not list revisions")
-      const previous = (revisions.revisions ?? [])[0]
-      if (!previous) throw new Error("No earlier revision to revert to")
-      const res = await api.revertRevision(fileid, previous.revisionid)
-      if (res.result !== 0) throw new Error(res.error ?? "Revert failed")
-      showResult(`\u2713 Reverted "${entry.metadata?.name ?? fileid}"`)
+      const since = new Date(entry.time)
+      if (Number.isNaN(since.getTime()))
+        throw new Error("That event has no usable timestamp")
+
+      const plan = await planRewind(api, since)
+      const restores = plan.actions.filter((a) => a.kind === "restore").length
+      const reverts = plan.actions.filter((a) => a.kind === "revert").length
+      const created = plan.actions.filter((a) => a.kind === "created").length
+
+      if (restores + reverts === 0) {
+        showResult("Nothing to undo — no deletions or edits since then.")
+        return
+      }
+
+      // Creations are counted but never undone: the only way to reverse one is
+      // to delete real data, which is indistinguishable from the accident a
+      // rewind is meant to repair.
+      const scope = [
+        `restore ${restores}`,
+        `revert ${reverts}`,
+        created > 0 ? `leave ${created} creation(s) alone` : "",
+      ]
+        .filter(Boolean)
+        .join(", ")
+
+      triggerConfirm(
+        `Rewind to ${since.toLocaleString()} — ${scope}?`,
+        async () => {
+          const outcomes = await applyRewind(api, plan)
+          const failed = outcomes.filter((o) => !o.ok)
+          showResult(
+            failed.length === 0
+              ? `✓ Rewound ${outcomes.length} change(s)`
+              : `Rewound ${outcomes.length - failed.length}/${outcomes.length} — ${failed[0].detail}`,
+            failed.length > 0,
+          )
+          loadChanges()
+        },
+      )
     })
   }
 
@@ -708,20 +837,30 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
 
     if (mode === "rewind") {
       const entry = changes[cursor]
-      const meta = entry?.metadata
-      if (!entry || meta?.fileid === undefined) return []
-      if (entry.event.startsWith("delete"))
-        return [
-          { label: `Restore "${meta.name}"`, run: () => restoreChange(entry) },
-        ]
-      if (entry.event === "modifyfile")
-        return [
-          {
-            label: `Revert "${meta.name}" to previous revision`,
-            run: () => revertChange(entry),
-          },
-        ]
-      return []
+      if (!entry) return []
+      const name = entry.metadata?.name ?? "item"
+      const recovery = recoveryFor(entry)
+
+      // Single-row recovery first: it is the narrower, safer thing, and putting
+      // the bulk rewind under the cursor's default would make one keystroke
+      // move hundreds of files.
+      return [
+        ...(recovery
+          ? [
+              {
+                label:
+                  recovery.kind === "revert"
+                    ? `Revert "${name}" to previous revision`
+                    : `Restore "${name}"`,
+                run: () => runRecovery(entry, recovery),
+              },
+            ]
+          : []),
+        {
+          label: "Rewind everything to just before this",
+          run: () => rewindTo(entry),
+        },
+      ]
     }
 
     if (mode !== "files") return []
@@ -788,7 +927,17 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
     if (phase !== "browsing") return
 
     if (key.return) {
-      if (actionsFor().length === 0) return
+      // A dead key is indistinguishable from a broken one. Most Rewind rows
+      // are creations, which have no inverse, so silence here read as the
+      // action modal being broken rather than absent.
+      if (actionsFor().length === 0) {
+        showResult(
+          mode === "rewind"
+            ? "Nothing to undo here — only deletions and edits can be recovered."
+            : "No actions for this selection.",
+        )
+        return
+      }
       setActionCursor(0)
       setPhase("actions")
       return
@@ -936,7 +1085,22 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   })
 
   const { rows: terminalRows = 24 } = useWindowSize()
-  const visibleCount = Math.max(5, terminalRows - 8)
+
+  // Header, its margin and the footer come to 8 rows, which the list used to
+  // claim in full — leaving nothing for an overlay, so Yoga composited the
+  // action modal's label and hint onto the same row. Every overlay is a
+  // sibling of the list, so the list has to give up its rows first.
+  const CHROME_ROWS = 8
+  const overlayRows =
+    phase === "actions"
+      ? actionsFor().length + 4
+      : phase === "confirming"
+        ? 3
+        : phase === "result"
+          ? 2
+          : 0
+  const visibleCount = Math.max(1, terminalRows - CHROME_ROWS - overlayRows)
+  const selectedChange = changes[cursor]
   const windowStart = Math.min(
     Math.max(0, cursor - Math.floor(visibleCount / 2)),
     Math.max(0, items.length - visibleCount),
@@ -972,7 +1136,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
               <ChangesList
                 entries={changes}
                 selected={cursor}
-                rows={Math.max(1, terminalRows - 8)}
+                rows={visibleCount}
                 emptyText="No recent changes"
               />
             </Box>
@@ -1008,19 +1172,30 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
             </>
           )}
         </Box>
-        <Preview
-          item={items[cursor]}
-          imageUrl={
-            previewImageItem === items[cursor]?.name
-              ? (previewImageUrl ?? undefined)
-              : undefined
-          }
-          markdownLines={
-            previewMarkdownItem === items[cursor]?.name
-              ? (previewMarkdownLines ?? undefined)
-              : undefined
-          }
-        />
+        {mode === "rewind" ? (
+          <Preview
+            item={selectedChange && changeItemToRow(selectedChange)}
+            hint={
+              selectedChange && recoveryFor(selectedChange)
+                ? "enter to recover or rewind"
+                : "enter to rewind from here"
+            }
+          />
+        ) : (
+          <Preview
+            item={items[cursor]}
+            imageUrl={
+              previewImageItem === items[cursor]?.name
+                ? (previewImageUrl ?? undefined)
+                : undefined
+            }
+            markdownLines={
+              previewMarkdownItem === items[cursor]?.name
+                ? (previewMarkdownLines ?? undefined)
+                : undefined
+            }
+          />
+        )}
       </Box>
       {phase === "confirming" && (
         <Box marginTop={1} paddingX={1} flexDirection="column">
