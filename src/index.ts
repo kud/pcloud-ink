@@ -46,3 +46,19 @@ export {
   shareRights,
   type ShareListProps,
 } from "./components/share-list.js"
+export {
+  TrashList,
+  trashId,
+  deletedOn,
+  type TrashListProps,
+} from "./components/trash-list.js"
+export {
+  PublinkList,
+  publinkExpiry,
+  type PublinkListProps,
+} from "./components/publink-list.js"
+export {
+  RevisionList,
+  byNewest,
+  type RevisionListProps,
+} from "./components/revision-list.js"
