@@ -3,6 +3,20 @@ import { Box, Text, useInput, useWindowSize } from "ink"
 import { Spinner, Tabs, TextInput, type TabItem } from "@kud/ink-ui"
 import { ChangesList } from "./components/changes-list.js"
 import { ShareList, shareRights } from "./components/share-list.js"
+import { SyncList } from "./components/sync-list.js"
+import {
+  SettingsPanel,
+  settingsRows,
+  isEntry,
+  nextEntry,
+  firstEntry,
+} from "./components/settings-panel.js"
+import type {
+  SettingsProvider,
+  SettingsView,
+  SyncPairView,
+  SyncProvider,
+} from "./lib/providers.js"
 import { isFolderEvent } from "./lib/event.js"
 import {
   buildRows,
@@ -41,7 +55,7 @@ type Phase =
   | "imagePreviewing"
   | "actions"
   | "uploading"
-type Mode = "files" | "trash" | "rewind" | "shares"
+type Mode = "files" | "trash" | "rewind" | "shares" | "sync" | "settings"
 
 const parentPath = (path: string): string => {
   if (path === "/") return "/"
@@ -111,18 +125,35 @@ const breadcrumbSegments = (
 // Live storage above, recovery below — the same split pCloud's own sidebar
 // makes, since the Rewind and Trash views show things that are not in the tree
 // any more and so have no breadcrumb to speak of.
-const TABS: TabItem<Mode>[] = [
+// Built from what the host can supply rather than fixed: a consumer with no
+// local pCloud database should not be offered a tab that could only ever be
+// empty. Everything downstream reads this array, so the tab, the cycle order
+// and the key hints all follow from one place.
+const tabsFor = (has: {
+  sync: boolean
+  settings: boolean
+}): TabItem<Mode>[] => [
   { value: "files", label: "Files" },
   { value: "rewind", label: "Rewind" },
   { value: "trash", label: "Trash" },
   { value: "shares", label: "Shares" },
+  ...(has.sync ? [{ value: "sync" as const, label: "Sync" }] : []),
+  ...(has.settings ? [{ value: "settings" as const, label: "Settings" }] : []),
 ]
 
-const Header = ({ path, mode }: { path: string; mode: Mode }) => {
+const Header = ({
+  path,
+  mode,
+  tabs,
+}: {
+  path: string
+  mode: Mode
+  tabs: TabItem<Mode>[]
+}) => {
   const segments = breadcrumbSegments(path)
   return (
     <Box flexDirection="column" paddingX={1} width="100%">
-      <Tabs active={mode} items={TABS} />
+      <Tabs active={mode} items={tabs} />
       <Box marginTop={1}>
         {mode !== "files"
           ? null
@@ -229,19 +260,24 @@ const SHARES_SECONDARY: HintPair[] = [
   { key: "q", label: "quit" },
 ]
 
+// Sync is read-only, so it offers no enter action and says so by omission.
+const SYNC_PRIMARY: HintPair[] = [{ key: "↑↓", label: "navigate" }]
+
 const Footer = ({ count, mode }: { count: number; mode: Mode }) => {
   const primary =
     mode === "files"
       ? FILES_PRIMARY
       : mode === "rewind"
         ? REWIND_PRIMARY
-        : SECONDARY_PRIMARY
+        : mode === "sync"
+          ? SYNC_PRIMARY
+          : SECONDARY_PRIMARY
   const secondary =
     mode === "files"
       ? FILES_SECONDARY
       : mode === "rewind"
         ? REWIND_SECONDARY
-        : mode === "shares"
+        : mode === "shares" || mode === "sync" || mode === "settings"
           ? SHARES_SECONDARY
           : SECONDARY_SECONDARY
   return (
@@ -629,9 +665,17 @@ const ImagePreview = ({
 export type PCloudBodyProps = {
   /** Called when the user quits. The host owns the terminal lifecycle. */
   onExit: () => void
+  /**
+   * Reads this machine's pCloud sync pairs. Omit it and the Sync tab is absent
+   * — the data lives in a local SQLite database, which a rendering package has
+   * no business opening.
+   */
+  sync?: SyncProvider
+  /** Reads and writes pCloud Drive's local client settings. Omit for no tab. */
+  settings?: SettingsProvider
 }
 
-export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
+export const PCloudBody = ({ onExit, sync, settings }: PCloudBodyProps) => {
   const [phase, setPhase] = useState<Phase>("loading")
   const [mode, setMode] = useState<Mode>("files")
   const [path, setPath] = useState("/")
@@ -646,6 +690,16 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   const [resultIsError, setResultIsError] = useState(false)
   const [trashItems, setTrashItems] = useState<PCloudTrashItem[]>([])
   const [currentFolderId, setCurrentFolderId] = useState<number | undefined>()
+  const [pairs, setPairs] = useState<SyncPairView[]>([])
+  const [config, setConfig] = useState<SettingsView>({
+    ignorePatterns: [],
+    ignorePaths: [],
+  })
+  const TABS = React.useMemo(
+    () =>
+      tabsFor({ sync: sync !== undefined, settings: settings !== undefined }),
+    [sync, settings],
+  )
   const [changes, setChanges] = useState<PCloudDiffEntry[]>([])
   const [outgoing, setOutgoing] = useState<PCloudShareItem[]>([])
   const [incoming, setIncoming] = useState<PCloudShareItem[]>([])
@@ -829,6 +883,24 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       .catch(() => {})
   }
 
+  const loadPairs = () => {
+    if (!sync) return
+    try {
+      setPairs(sync())
+    } catch (error) {
+      showResult(error instanceof Error ? error.message : String(error), true)
+    }
+  }
+
+  const loadConfig = () => {
+    if (!settings) return
+    try {
+      setConfig(settings.read())
+    } catch (error) {
+      showResult(error instanceof Error ? error.message : String(error), true)
+    }
+  }
+
   const loadChanges = () => {
     setPhase("loading")
     api
@@ -855,6 +927,15 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
     if (next === "files") loadFiles(path)
     if (next === "trash") loadTrash()
     if (next === "rewind") loadChanges()
+    if (next === "sync") {
+      loadPairs()
+      setPhase("browsing")
+    }
+    if (next === "settings") {
+      loadConfig()
+      setCursor(firstEntry(settingsRows(settings?.read() ?? config)))
+      setPhase("browsing")
+    }
     if (next === "shares") {
       loadShares()
       setPhase("browsing")
@@ -995,7 +1076,10 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
     setPhase("browsing")
     const target = currentFolderId
     if (target === undefined) {
-      showResult("Cannot tell which folder this is — reload and try again", true)
+      showResult(
+        "Cannot tell which folder this is — reload and try again",
+        true,
+      )
       return
     }
 
@@ -1005,13 +1089,36 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
     runAction(async () => {
       if (!fs.existsSync(source)) throw new Error(`No such file: ${source}`)
       if (fs.statSync(source).isDirectory())
-        throw new Error("That is a folder. pCloud's upload takes one file at a time.")
+        throw new Error(
+          "That is a folder. pCloud's upload takes one file at a time.",
+        )
 
       const name = nodePath.basename(source)
       const res = await api.uploadFile(target, name, fs.readFileSync(source))
       if (res.result !== 0) throw new Error(res.error ?? "Upload failed")
       showResult(`✓ Uploaded "${name}"`)
       loadFiles(path)
+    })
+  }
+
+  const removeIgnore = (value: string, list: "patterns" | "paths") => {
+    if (!settings) return
+    triggerConfirm(`Stop ignoring "${value}"?`, async () => {
+      const next: SettingsView =
+        list === "patterns"
+          ? {
+              ...config,
+              ignorePatterns: config.ignorePatterns.filter((p) => p !== value),
+            }
+          : {
+              ...config,
+              ignorePaths: config.ignorePaths.filter((p) => p !== value),
+            }
+      // The host throws when pCloud Drive is running, since it would flush its
+      // own settings over the write on quit. Surfaced, not swallowed.
+      settings.write(next)
+      setConfig(next)
+      showResult(`✓ No longer ignoring "${value}"`)
     })
   }
 
@@ -1022,7 +1129,8 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
         // shareid, not sharerequestid — removeshare ends an accepted share,
         // and sending the wrong id fails with a message about the other one.
         const res = await api.removeShare(share.shareid)
-        if (res.result !== 0) throw new Error(res.error ?? "Could not stop sharing")
+        if (res.result !== 0)
+          throw new Error(res.error ?? "Could not stop sharing")
         showResult(`✓ Stopped sharing "${share.foldername ?? share.folderid}"`)
         loadShares()
       },
@@ -1140,6 +1248,22 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
         },
       ]
     }
+
+    if (mode === "settings") {
+      const row = settingsRows(config)[cursor]
+      if (!isEntry(row) || !settings) return []
+      return [
+        {
+          label: `Stop ignoring "${row.value}"`,
+          detail:
+            "pCloud will start syncing anything matching it. Takes effect " +
+            "when pCloud Drive next starts.",
+          run: () => removeIgnore(row.value, row.list),
+        },
+      ]
+    }
+
+    if (mode === "sync") return []
 
     if (mode === "shares") {
       const share = selectedShare
@@ -1343,6 +1467,21 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       return
     }
 
+    if (mode === "sync") {
+      if (key.downArrow) setCursor((c) => Math.min(pairs.length - 1, c + 1))
+      if (key.upArrow) setCursor((c) => Math.max(0, c - 1))
+      if (input === "r") loadPairs()
+      return
+    }
+
+    if (mode === "settings") {
+      const rows = settingsRows(config)
+      if (key.downArrow) setCursor((c) => nextEntry(rows, c, 1))
+      if (key.upArrow) setCursor((c) => nextEntry(rows, c, -1))
+      if (input === "r") loadConfig()
+      return
+    }
+
     if (mode === "shares") {
       const total = outgoing.length + incoming.length
       if (key.downArrow) setCursor((c) => Math.min(total - 1, c + 1))
@@ -1520,16 +1659,17 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
       : phase === "uploading"
         ? 6
         : phase === "confirming"
-        ? 3
-        : phase === "result"
-          ? 2
-          : 0
+          ? 3
+          : phase === "result"
+            ? 2
+            : 0
   // The "N more" markers above and below the window occupy rows of their own,
   // and the file list is the only view that draws them. Reserving both
   // unconditionally costs two lines on a list that already fits, which beats
   // the self-referential alternative where the window size depends on whether
   // the window overflows.
-  const SCROLL_MARKER_ROWS = mode === "rewind" || mode === "shares" ? 0 : 2
+  // Only Files and Trash draw the "N more" markers around their window.
+  const SCROLL_MARKER_ROWS = mode === "files" || mode === "trash" ? 2 : 0
   const visibleCount = Math.max(
     1,
     terminalRows - CHROME_ROWS - overlayRows - SCROLL_MARKER_ROWS,
@@ -1552,7 +1692,7 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
   // float directly under the last row rather than sitting at the screen edge.
   return (
     <Box flexDirection="column" height={terminalRows}>
-      <Header path={path} mode={mode} />
+      <Header path={path} mode={mode} tabs={TABS} />
       <Box flexDirection="row" flexGrow={1} marginTop={1}>
         <Box flexDirection="column" flexGrow={1}>
           {/* Only the content waits. Replacing the whole screen with a spinner
@@ -1564,6 +1704,34 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
                 label={
                   phase === "executing" ? "Executing\u2026" : "Loading\u2026"
                 }
+              />
+            </Box>
+          ) : mode === "sync" ? (
+            <Box paddingX={1} flexDirection="column">
+              <SyncList pairs={pairs} selected={cursor} rows={visibleCount} />
+              {pairs.some((p) => p.issues.length > 0) && (
+                <Box marginTop={1} flexDirection="column">
+                  {pairs
+                    .filter((p) => p.issues.length > 0)
+                    .map((p) => (
+                      <Box key={p.id} flexDirection="column">
+                        <Text color="red">{`#${p.id}  ${p.local}`}</Text>
+                        {p.issues.map((issue) => (
+                          <Text key={issue} dimColor color="white">
+                            {`   ${issue}`}
+                          </Text>
+                        ))}
+                      </Box>
+                    ))}
+                </Box>
+              )}
+            </Box>
+          ) : mode === "settings" ? (
+            <Box paddingX={1} flexDirection="column">
+              <SettingsPanel
+                settings={config}
+                selected={cursor}
+                rows={visibleCount}
               />
             </Box>
           ) : mode === "shares" ? (
@@ -1741,7 +1909,14 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
         </Box>
       )}
       {phase === "uploading" && (
-        <Box marginTop={1} marginX={1} paddingX={1} flexDirection="column" borderStyle="round" borderColor="cyan">
+        <Box
+          marginTop={1}
+          marginX={1}
+          paddingX={1}
+          flexDirection="column"
+          borderStyle="round"
+          borderColor="cyan"
+        >
           <Text bold color="cyan">{`Upload into ${path}`}</Text>
           <Box>
             <Text color="gray">{"  "}</Text>
@@ -1764,7 +1939,17 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
         </Box>
       )}
       <Footer
-        count={mode === "rewind" ? changes.length : items.length}
+        count={
+          mode === "rewind"
+            ? changes.length
+            : mode === "shares"
+              ? outgoing.length + incoming.length
+              : mode === "sync"
+                ? pairs.length
+                : mode === "settings"
+                  ? config.ignorePatterns.length + config.ignorePaths.length
+                  : items.length
+        }
         mode={mode}
       />
     </Box>
@@ -1774,8 +1959,8 @@ export const PCloudBody = ({ onExit }: PCloudBodyProps) => {
 // Wrapping is part of the contract, not a detail: the image preview needs the
 // terminal-info context, so a host that mounted <PCloudBody> bare would render
 // without previews and have no obvious reason why.
-export const PCloudBrowser = ({ onExit }: PCloudBodyProps) => (
+export const PCloudBrowser = (props: PCloudBodyProps) => (
   <TerminalInfoProvider>
-    <PCloudBody onExit={onExit} />
+    <PCloudBody {...props} />
   </TerminalInfoProvider>
 )

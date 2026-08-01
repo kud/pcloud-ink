@@ -63,3 +63,21 @@ export {
   type RevisionListProps,
 } from "./components/revision-list.js"
 export { fit } from "./lib/fit.js"
+export { SyncList, type SyncListProps } from "./components/sync-list.js"
+export {
+  SettingsPanel,
+  settingsRows,
+  isEntry,
+  nextEntry,
+  firstEntry,
+  type SettingsPanelProps,
+  type SettingsRow,
+} from "./components/settings-panel.js"
+export {
+  pairGlyph,
+  pairIsHealthy,
+  type SyncPairView,
+  type SettingsView,
+  type SyncProvider,
+  type SettingsProvider,
+} from "./lib/providers.js"
