@@ -1,7 +1,7 @@
 import React from "react"
 import { Box, Text } from "ink"
 import { SelectableRow, colors } from "@kud/ink-ui"
-import type { PCloudShareItem } from "@kud/pcloud"
+import { formatDate, type PCloudShareItem } from "@kud/pcloud"
 import { windowSlice } from "../lib/window.js"
 import { fit } from "../lib/fit.js"
 
@@ -24,21 +24,6 @@ export const shareRights = (share: PCloudShareItem): string =>
     share.cancreate ? "c" : "-",
     share.candelete ? "d" : "-",
   ].join("")
-
-// Date only. A full timestamp pushed the row past the terminal edge and
-// truncated to "03…", which tells you less than nothing — and the time of day a
-// share was created has never been the interesting part.
-export const shareDate = (created: string | undefined): string => {
-  if (!created) return ""
-  const at = new Date(created)
-  return Number.isNaN(at.getTime())
-    ? ""
-    : at.toLocaleDateString(undefined, {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      })
-}
 
 // Controlled, windowed share listing, laid out to match FileList — a folder is
 // a folder whichever command surfaced it, so `list-shares` should not read like
@@ -79,7 +64,7 @@ export const ShareList = ({
               </Text>
               <Text color={colors.info}>{fit(who, 30)}</Text>
               <Text color={colors.muted}>{fit(shareRights(share), 6)}</Text>
-              <Text color={colors.muted}>{shareDate(share.created)}</Text>
+              <Text color={colors.muted}>{formatDate(share.created)}</Text>
             </Text>
           </SelectableRow>
         )

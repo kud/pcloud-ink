@@ -9,7 +9,6 @@ import {
   firstEntry,
 } from "./settings-panel.js"
 import { SyncList } from "./sync-list.js"
-import { shareDate } from "./share-list.js"
 import { pairGlyph, pairIsHealthy } from "../lib/providers.js"
 
 const CONFIG = {
@@ -103,16 +102,4 @@ test("SyncList shows the empty state", () => {
   )
 })
 
-// A full timestamp pushed the row past the terminal edge and truncated to
-// "03…" — worse than showing nothing, since it looks like data.
-test("shareDate is short enough to survive the row", () => {
-  const rendered = shareDate("Mon, 03 Nov 2025 10:00:00 +0000")
-  expect(rendered).toContain("2025")
-  expect(rendered.length).toBeLessThanOrEqual(12)
-  expect(rendered).not.toContain(":")
-})
 
-test("shareDate degrades rather than throwing", () => {
-  expect(shareDate(undefined)).toBe("")
-  expect(shareDate("not a date")).toBe("")
-})

@@ -44,6 +44,7 @@ import {
   planRewind,
   applyRewind,
   pathResolver,
+  formatDate,
 } from "@kud/pcloud"
 
 type Phase =
@@ -97,11 +98,6 @@ const formatSize = (bytes: number): string => {
   if (bytes < 1024 * 1024 * 1024)
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
-}
-
-const formatDate = (modified: string | undefined): string => {
-  if (!modified) return ""
-  return modified.slice(0, 10)
 }
 
 const IMAGE_EXTS = new Set([
