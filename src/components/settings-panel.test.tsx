@@ -60,8 +60,8 @@ test("an empty config still renders both headings", () => {
 
 const PAIR = {
   id: 1,
-  local: "~/pCloud/Appdata",
-  remote: "Appdata",
+  local: "~/pCloud/Documents",
+  remote: "Documents",
   files: 590,
   queued: 0,
   issues: [],
