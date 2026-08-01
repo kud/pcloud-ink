@@ -691,6 +691,7 @@ export const PCloudBody = ({ onExit, sync, settings }: PCloudBodyProps) => {
   const [trashItems, setTrashItems] = useState<PCloudTrashItem[]>([])
   const [currentFolderId, setCurrentFolderId] = useState<number | undefined>()
   const [pairs, setPairs] = useState<SyncPairView[]>([])
+  const [pairsReadAt, setPairsReadAt] = useState<Date | undefined>()
   const [config, setConfig] = useState<SettingsView>({
     ignorePatterns: [],
     ignorePaths: [],
@@ -887,6 +888,10 @@ export const PCloudBody = ({ onExit, sync, settings }: PCloudBodyProps) => {
     if (!sync) return
     try {
       setPairs(sync())
+      // A reload that finds identical data changes nothing on screen, so
+      // without a timestamp `r` looks broken even though it re-read the whole
+      // database. The clock is the only honest proof it did anything.
+      setPairsReadAt(new Date())
     } catch (error) {
       showResult(error instanceof Error ? error.message : String(error), true)
     }
@@ -1709,6 +1714,13 @@ export const PCloudBody = ({ onExit, sync, settings }: PCloudBodyProps) => {
           ) : mode === "sync" ? (
             <Box paddingX={1} flexDirection="column">
               <SyncList pairs={pairs} selected={cursor} rows={visibleCount} />
+              {pairsReadAt && (
+                <Box marginTop={1}>
+                  <Text color="gray">
+                    {`read at ${pairsReadAt.toLocaleTimeString(undefined, { hour12: false })}`}
+                  </Text>
+                </Box>
+              )}
               {pairs.some((p) => p.issues.length > 0) && (
                 <Box marginTop={1} flexDirection="column">
                   {pairs
@@ -1820,7 +1832,11 @@ export const PCloudBody = ({ onExit, sync, settings }: PCloudBodyProps) => {
             </>
           )}
         </Box>
-        {mode === "shares" ? (
+        {/* Sync and Settings get the full width. Their rows are wide and
+            there is nothing a side panel would add that the row does not
+            already say — where Files, Rewind and Shares each have detail worth
+            a second column. */}
+        {mode === "sync" || mode === "settings" ? null : mode === "shares" ? (
           <SharePreview
             share={selectedShare}
             direction={cursor < outgoing.length ? "outgoing" : "incoming"}
