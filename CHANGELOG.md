@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-08-01
+
+### Changed
+
+- **`@kud/pcloud` is now a peer dependency**, alongside `ink` and `react`.
+  Declaring it as a regular dependency gave every consumer a second, nested copy
+  — so the `PCloudAPI` the host held and the one this package expected were
+  structurally identical but nominally different types, and passing a client
+  across the boundary failed to typecheck.
+
+  Install it alongside this package:
+
+  ```sh
+  npm install @kud/pcloud-ink @kud/pcloud
+  ```
+
+### Fixed
+
+- **The package listed itself as its own dependency**, pinned to an old version,
+  so installing it also installed a stale copy of itself into its own
+  `node_modules`.
+
+[2.0.0]: https://github.com/kud/pcloud-ink/compare/v1.1.0...v2.0.0
+
 ## [1.1.0] - 2026-08-01
 
 ### Changed
