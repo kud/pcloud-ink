@@ -81,3 +81,4 @@ export {
   type SyncProvider,
   type SettingsProvider,
 } from "./lib/providers.js"
+export { shareDate } from "./components/share-list.js"
