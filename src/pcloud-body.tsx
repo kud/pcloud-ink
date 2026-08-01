@@ -710,6 +710,9 @@ export const PCloudBody = ({
   const [resultIsError, setResultIsError] = useState(false)
   const [trashItems, setTrashItems] = useState<PCloudTrashItem[]>([])
   const [currentFolderId, setCurrentFolderId] = useState<number | undefined>()
+  // A ref rather than state: it is read once by the load that follows and must
+  // not itself trigger a render.
+  const returningTo = React.useRef<string | undefined>(undefined)
   const [pairs, setPairs] = useState<SyncPairView[]>([])
   const [pairsReadAt, setPairsReadAt] = useState<Date | undefined>()
   const [config, setConfig] = useState<SettingsView>({
@@ -857,9 +860,18 @@ export const PCloudBody = ({
       .listFolder(targetPath)
       .then((response) => {
         const contents = response.metadata?.contents ?? []
+        const sorted = sortItems(contents)
         setCurrentFolderId(response.metadata?.folderid)
-        setItems(sortItems(contents))
-        setCursor(0)
+        setItems(sorted)
+
+        // Consumed whether or not it matches, so a stale name cannot survive
+        // to hijack the cursor on some later, unrelated load.
+        const returning = returningTo.current
+        returningTo.current = undefined
+        const at = returning
+          ? sorted.findIndex((item) => item.name === returning)
+          : -1
+        setCursor(at === -1 ? 0 : at)
         setPhase("browsing")
       })
       .catch((err) => {
@@ -1021,8 +1033,17 @@ export const PCloudBody = ({
     }
   }
 
+  // Coming out of a folder should land on the folder you came out of, not back
+  // at the top of the list — the reason for going up is usually to step
+  // sideways into its neighbour.
+  //
+  // Remembered by name rather than index: the listing can change between the
+  // two renders, and an index would then point confidently at the wrong row,
+  // where a name either matches or falls back to the top.
   const goUp = () => {
-    if (path !== "/") setPath(parentPath(path))
+    if (path === "/") return
+    returningTo.current = path.slice(path.lastIndexOf("/") + 1)
+    setPath(parentPath(path))
   }
 
   const openFile = (fileid: number) => {

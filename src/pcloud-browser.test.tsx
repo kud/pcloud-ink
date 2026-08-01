@@ -194,6 +194,79 @@ describe("failure", () => {
   })
 })
 
+describe("walking the tree", () => {
+  // Three folders so "came back to the right one" is distinguishable from
+  // "landed on the first one", which is what it used to do.
+  const tree: Record<string, string[]> = {
+    "/": ["Alpha", "Beta", "Gamma"],
+    "/Beta": ["inner.txt"],
+  }
+
+  const treeApi = () =>
+    api({
+      listFolder: vi.fn(async (p: string) => ({
+        result: 0,
+        metadata: {
+          folderid: p === "/" ? 1 : 2,
+          contents: (tree[p] ?? []).map((name, i) => ({
+            name,
+            isfolder: !name.includes("."),
+            folderid: name.includes(".") ? undefined : 10 + i,
+            fileid: name.includes(".") ? 20 + i : undefined,
+          })),
+        },
+      })),
+    })
+
+  const cursorLine = (frame: string) =>
+    frame.split("\n").find((l) => l.trimStart().startsWith("❯")) ?? ""
+
+  it("returns to the folder you came out of, not the top of the list", async () => {
+    const { lastFrame, stdin } = render(
+      <PCloudBody onExit={() => {}} api={treeApi()} />,
+    )
+    await settled()
+
+    // Down twice to Beta, right to enter it.
+    stdin.write("[B")
+    await settled()
+    stdin.write("[C")
+    await settled()
+    expect(lastFrame() ?? "").toContain("inner.txt")
+
+    // Left to come back out.
+    stdin.write("[D")
+    await settled()
+    expect(cursorLine(lastFrame() ?? "")).toContain("Beta")
+  })
+
+  it("falls back to the top when the folder is no longer there", async () => {
+    const vanishing = api({
+      listFolder: vi.fn(async (p: string) => ({
+        result: 0,
+        metadata: {
+          folderid: p === "/" ? 1 : 2,
+          contents:
+            p === "/"
+              ? // Beta has gone by the time we come back to the parent.
+                [{ name: "Alpha", isfolder: true, folderid: 10 }]
+              : [{ name: "inner.txt", isfolder: false, fileid: 20 }],
+        },
+      })),
+    })
+    const { lastFrame, stdin } = render(
+      <PCloudBody onExit={() => {}} api={vanishing} />,
+    )
+    await settled()
+    stdin.write("[C")
+    await settled()
+    stdin.write("[D")
+    await settled()
+    // No crash, no cursor stranded past the end — just the first row.
+    expect(cursorLine(lastFrame() ?? "")).toContain("Alpha")
+  })
+})
+
 describe("navigating between tabs", () => {
   it("tab moves forward through the tabs the host enabled", async () => {
     const { lastFrame, stdin } = mount({ sync: () => PAIRS })
