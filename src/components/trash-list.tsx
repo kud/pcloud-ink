@@ -1,7 +1,7 @@
 import React from "react"
 import { Box, Text } from "ink"
 import { SelectableRow, colors } from "@kud/ink-ui"
-import { formatBytes, type PCloudTrashItem } from "@kud/pcloud"
+import { formatBytes, formatDate, type PCloudTrashItem } from "@kud/pcloud"
 import { windowSlice } from "../lib/window.js"
 import { fit } from "../lib/fit.js"
 
@@ -25,7 +25,7 @@ export const trashId = (
 export const deletedOn = (item: PCloudTrashItem): string => {
   if (!item.deletetime) return "-"
   const at = new Date(item.deletetime * 1000)
-  return Number.isNaN(at.getTime()) ? "-" : at.toISOString().slice(0, 10)
+  return Number.isNaN(at.getTime()) ? "-" : formatDate(at.toUTCString())
 }
 
 // Controlled, windowed trash listing, laid out to match FileList.
@@ -52,14 +52,14 @@ export const TrashList = ({
           <SelectableRow key={trashId(item) + idx} active={idx === selected}>
             <Text wrap="truncate-end">
               <Text color={colors.muted}>
-                {fit((isFolder ? "dir" : "file"), 6)}
+                {fit(isFolder ? "dir" : "file", 6)}
               </Text>
               <Text color={colors.muted}>{fit(trashId(item), 13)}</Text>
               <Text bold={isFolder}>
                 {fit(`${item.name}${isFolder ? "/" : ""}`, 38)}
               </Text>
               <Text color={colors.info}>
-                {fit((isFolder ? "-" : formatBytes(item.size ?? 0)), 12)}
+                {fit(isFolder ? "-" : formatBytes(item.size ?? 0), 12)}
               </Text>
               <Text color={colors.muted}>{deletedOn(item)}</Text>
             </Text>

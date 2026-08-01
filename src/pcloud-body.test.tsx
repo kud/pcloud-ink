@@ -31,7 +31,7 @@ test("a trashed file keeps its deletion date and reads as a file", () => {
 
   expect(row.isfolder).toBe(false)
   expect(row.fileid).toBe(7)
-  expect(row.modified).toBe("2023-11-14")
+  expect(row.modified).toBe("14 Nov 2023")
 })
 
 // A folder deletion carries folderid and no fileid. Keying recovery off fileid

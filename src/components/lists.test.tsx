@@ -17,7 +17,7 @@ test("trashId prefers folderid, since trash is mostly folders", () => {
 // new Date(NaN).toISOString() throws rather than degrading, and a trashed
 // folder has no deletetime at all — this once killed the whole Trash view.
 test("deletedOn survives a missing or unparseable deletetime", () => {
-  expect(deletedOn({ deletetime: 1_700_000_000 } as never)).toBe("2023-11-14")
+  expect(deletedOn({ deletetime: 1_700_000_000 } as never)).toBe("14 Nov 2023")
   expect(deletedOn({ name: "folder" } as never)).toBe("-")
   expect(deletedOn({ deletetime: Number.NaN } as never)).toBe("-")
 })

@@ -369,7 +369,7 @@ export const trashItemToRow = (
   isfolder: item.folderid !== undefined,
   size: item.size,
   modified: item.deletetime
-    ? new Date(item.deletetime * 1000).toISOString().slice(0, 10)
+    ? formatDate(new Date(item.deletetime * 1000).toUTCString())
     : undefined,
 })
 
