@@ -64,7 +64,13 @@ const parentPath = (path: string): string => {
   return parent === "" ? "/" : parent
 }
 
-const buildAPI = (): PCloudAPI => {
+// Falls back to the stored credential so the CLI can mount this with no props,
+// but a host that already holds an authenticated client should pass one — a
+// component library has no business reaching for a global credential, and
+// calling process.exit from inside a render is not something a consumer can
+// recover from or a test can survive.
+const buildAPI = (provided?: PCloudAPI): PCloudAPI => {
+  if (provided) return provided
   const api = resolveStoredAuth()
   if (!api) {
     console.error("Not authenticated. Run `pcloud login` first.")
@@ -329,8 +335,11 @@ const ItemRow = ({
       >
         {icon}
       </Text>
+      {/* A trailing slash, matching FileList and `pcloud ls`. The icon beside
+          it is a nerd-font glyph, which renders as a blank box in any terminal
+          without the font — leaving directory-ness carried by colour alone. */}
       <Text bold={selected} color="white">
-        {item.name}
+        {`${item.name}${item.isfolder ? "/" : ""}`}
       </Text>
       {/* An arrow, not a colour: which direction a folder is shared is the
           whole point, and "shared" alone leaves you guessing whether you gave
@@ -673,9 +682,20 @@ export type PCloudBodyProps = {
   sync?: SyncProvider
   /** Reads and writes pCloud Drive's local client settings. Omit for no tab. */
   settings?: SettingsProvider
+  /**
+   * An authenticated client. Omit and the stored credential is used, which is
+   * what the CLI wants; pass one when the host already holds a session, or
+   * when mounting this without a credential store at all.
+   */
+  api?: PCloudAPI
 }
 
-export const PCloudBody = ({ onExit, sync, settings }: PCloudBodyProps) => {
+export const PCloudBody = ({
+  onExit,
+  sync,
+  settings,
+  api: providedApi,
+}: PCloudBodyProps) => {
   const [phase, setPhase] = useState<Phase>("loading")
   const [mode, setMode] = useState<Mode>("files")
   const [path, setPath] = useState("/")
@@ -730,7 +750,7 @@ export const PCloudBody = ({ onExit, sync, settings }: PCloudBodyProps) => {
     () => buildRows(changes, expandedRuns, now),
     [changes, expandedRuns, now],
   )
-  const api = React.useMemo(() => buildAPI(), [])
+  const api = React.useMemo(() => buildAPI(providedApi), [providedApi])
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null)
   const [previewImageItem, setPreviewImageItem] = useState<string | null>(null)
   const [previewMarkdownLines, setPreviewMarkdownLines] = useState<
@@ -884,25 +904,31 @@ export const PCloudBody = ({ onExit, sync, settings }: PCloudBodyProps) => {
       .catch(() => {})
   }
 
-  const loadPairs = () => {
-    if (!sync) return
+  // Returns whether it worked, so the caller can leave the error on screen
+  // rather than replacing it with an empty tab.
+  const loadPairs = (): boolean => {
+    if (!sync) return false
     try {
       setPairs(sync())
       // A reload that finds identical data changes nothing on screen, so
       // without a timestamp `r` looks broken even though it re-read the whole
       // database. The clock is the only honest proof it did anything.
       setPairsReadAt(new Date())
+      return true
     } catch (error) {
       showResult(error instanceof Error ? error.message : String(error), true)
+      return false
     }
   }
 
-  const loadConfig = () => {
-    if (!settings) return
+  const loadConfig = (): boolean => {
+    if (!settings) return false
     try {
       setConfig(settings.read())
+      return true
     } catch (error) {
       showResult(error instanceof Error ? error.message : String(error), true)
+      return false
     }
   }
 
@@ -932,14 +958,17 @@ export const PCloudBody = ({ onExit, sync, settings }: PCloudBodyProps) => {
     if (next === "files") loadFiles(path)
     if (next === "trash") loadTrash()
     if (next === "rewind") loadChanges()
+    // Only on success. Setting "browsing" unconditionally overwrote the
+    // "result" phase the loader had just set to show its error, so a provider
+    // that threw left the tab silently empty with no way to find out why.
     if (next === "sync") {
-      loadPairs()
-      setPhase("browsing")
+      if (loadPairs()) setPhase("browsing")
     }
     if (next === "settings") {
-      loadConfig()
-      setCursor(firstEntry(settingsRows(settings?.read() ?? config)))
-      setPhase("browsing")
+      if (loadConfig()) {
+        setCursor(firstEntry(settingsRows(config)))
+        setPhase("browsing")
+      }
     }
     if (next === "shares") {
       loadShares()
