@@ -25,6 +25,17 @@ export const shareRights = (share: PCloudShareItem): string =>
     share.candelete ? "d" : "-",
   ].join("")
 
+// The list pane gets roughly half the terminal — about 72 columns on a wide
+// one — and the row has to end before that edge, not at it. A test holds these
+// under the budget, because the row is truncate-end: overrunning does not wrap,
+// it silently eats the rightmost columns. "rwc-…" is what that looks like.
+export const SHARE_COLUMNS = { id: 7, folder: 20, who: 24, rights: 6, date: 11 }
+
+export const SHARE_ROW_WIDTH = Object.values(SHARE_COLUMNS).reduce(
+  (total, width) => total + width,
+  0,
+)
+
 // Controlled, windowed share listing, laid out to match FileList — a folder is
 // a folder whichever command surfaced it, so `list-shares` should not read like
 // output from a different program than `ls`.
@@ -57,13 +68,18 @@ export const ShareList = ({
               {/* shareid first, because it is the argument remove-share takes
                   and hunting for it in a trailing column is the common task. */}
               <Text color={colors.muted}>
-                {fit(String(share.shareid ?? "-"), 9)}
+                {fit(String(share.shareid ?? "-"), SHARE_COLUMNS.id)}
               </Text>
               <Text bold>
-                {fit(`${share.foldername ?? share.folderid}/`, 24)}
+                {fit(
+                  `${share.foldername ?? share.folderid}/`,
+                  SHARE_COLUMNS.folder,
+                )}
               </Text>
-              <Text color={colors.info}>{fit(who, 30)}</Text>
-              <Text color={colors.muted}>{fit(shareRights(share), 6)}</Text>
+              <Text color={colors.info}>{fit(who, SHARE_COLUMNS.who)}</Text>
+              <Text color={colors.muted}>
+                {fit(shareRights(share), SHARE_COLUMNS.rights)}
+              </Text>
               <Text color={colors.muted}>{formatDate(share.created)}</Text>
             </Text>
           </SelectableRow>

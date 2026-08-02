@@ -2,6 +2,8 @@ import React from "react"
 import { test, expect } from "vitest"
 import { render } from "ink-testing-library"
 import { TrashList, trashId, deletedOn } from "./trash-list.js"
+import { SHARE_COLUMNS, SHARE_ROW_WIDTH, shareRights } from "./share-list.js"
+import { formatDate } from "@kud/pcloud"
 import { PublinkList, publinkExpiry } from "./publink-list.js"
 import { RevisionList, byNewest } from "./revision-list.js"
 
@@ -99,4 +101,16 @@ test("RevisionList marks the newest, which is what revert usually means", () => 
   expect(lines[0]).toContain("9")
   expect(lines[0]).toContain("latest")
   expect(lines[1]).not.toContain("latest")
+})
+
+// The row is truncate-end: overrun does not wrap, it silently eats the right
+// hand columns. A screenshot of "rwc-…" is how we found that out.
+test("a share row fits the pane the browser gives it", () => {
+  expect(SHARE_ROW_WIDTH).toBeLessThanOrEqual(70)
+})
+
+test("every share column leaves a gutter for its longest value", () => {
+  expect(SHARE_COLUMNS.date).toBe(formatDate("Mon, 03 Nov 2025 10:00:00 +0000").length)
+  expect(SHARE_COLUMNS.rights).toBeGreaterThan(shareRights({ canread: true } as never).length)
+  expect(SHARE_COLUMNS.who).toBeGreaterThan("colleague@example.com".length)
 })
