@@ -1,5 +1,5 @@
 import { test, expect } from "vitest"
-import { trashItemToRow, recoveryFor } from "./pcloud-body.js"
+import { trashItemToRow, recoveryFor, openingScreen } from "./pcloud-body.js"
 
 // A trashed folder has no deletetime, and new Date(NaN).toISOString() throws
 // rather than returning something harmless — so this crashed the whole Trash
@@ -79,4 +79,30 @@ test("a creation has no recovery, since undoing it would delete real data", () =
       metadata: { fileid: 7, name: "notes.md" },
     }),
   ).toBeUndefined()
+})
+
+// Sync and Settings only exist when the host can feed them. Honouring
+// --screen sync on a host without a sync provider would open a tab that is not
+// in the tab bar, leaving the header highlighting nothing and the body empty
+// with no way back that a user would guess.
+test("a screen the host cannot feed falls back to Files", () => {
+  expect(openingScreen("sync", { sync: false, settings: false })).toBe("files")
+  expect(openingScreen("settings", { sync: true, settings: false })).toBe(
+    "files",
+  )
+})
+
+test("a screen the host can feed is honoured", () => {
+  expect(openingScreen("sync", { sync: true, settings: true })).toBe("sync")
+  expect(openingScreen("trash", { sync: false, settings: false })).toBe("trash")
+})
+
+test("no requested screen opens on Files", () => {
+  expect(openingScreen(undefined, { sync: true, settings: true })).toBe("files")
+})
+
+test("an unknown screen name falls back rather than opening a blank tab", () => {
+  expect(openingScreen("nope" as never, { sync: true, settings: true })).toBe(
+    "files",
+  )
 })

@@ -56,7 +56,7 @@ type Phase =
   | "imagePreviewing"
   | "actions"
   | "uploading"
-type Mode = "files" | "trash" | "rewind" | "shares" | "sync" | "settings"
+export type Mode = "files" | "trash" | "rewind" | "shares" | "sync" | "settings"
 
 const parentPath = (path: string): string => {
   if (path === "/") return "/"
@@ -131,7 +131,7 @@ const breadcrumbSegments = (
 // local pCloud database should not be offered a tab that could only ever be
 // empty. Everything downstream reads this array, so the tab, the cycle order
 // and the key hints all follow from one place.
-const tabsFor = (has: {
+export const tabsFor = (has: {
   sync: boolean
   settings: boolean
 }): TabItem<Mode>[] => [
@@ -142,6 +142,14 @@ const tabsFor = (has: {
   ...(has.sync ? [{ value: "sync" as const, label: "Sync" }] : []),
   ...(has.settings ? [{ value: "settings" as const, label: "Settings" }] : []),
 ]
+
+// A host may ask to open on any screen, but only the tabs it can feed exist.
+// Falling back to Files beats honouring the request into a tab that could only
+// ever render empty.
+export const openingScreen = (
+  want: Mode | undefined,
+  has: { sync: boolean; settings: boolean },
+): Mode => (want && tabsFor(has).some((t) => t.value === want) ? want : "files")
 
 const Header = ({
   path,
@@ -684,6 +692,13 @@ export type PCloudBodyProps = {
    * when mounting this without a credential store at all.
    */
   api?: PCloudAPI
+  /**
+   * The screen to open on. Omit for Files. A host passes this to deep-link:
+   * screenshot tooling shooting one tab at a time, or a developer reloading
+   * straight back into the panel they are working on instead of navigating
+   * there again on every restart.
+   */
+  initialScreen?: Mode
 }
 
 export const PCloudBody = ({
@@ -691,9 +706,15 @@ export const PCloudBody = ({
   sync,
   settings,
   api: providedApi,
+  initialScreen,
 }: PCloudBodyProps) => {
   const [phase, setPhase] = useState<Phase>("loading")
-  const [mode, setMode] = useState<Mode>("files")
+  const [mode, setMode] = useState<Mode>(() =>
+    openingScreen(initialScreen, {
+      sync: sync !== undefined,
+      settings: settings !== undefined,
+    }),
+  )
   const [path, setPath] = useState("/")
   const [items, setItems] = useState<PCloudFolderItem[]>([])
   const [cursor, setCursor] = useState(0)

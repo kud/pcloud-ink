@@ -21,9 +21,14 @@ export {
 // or call render(), reporting quit through the required onExit callback, so a
 // host — the CLI, a cockpit pane — mounts it as one component and keeps the
 // terminal lifecycle to itself.
+// tabsFor is exported alongside so a host can enumerate the screens it is able
+// to offer — what `--screen list` prints, and what validates `--screen <name>`
+// before the browser is ever mounted.
 export {
   PCloudBody,
   PCloudBrowser,
+  tabsFor,
+  type Mode,
   type PCloudBodyProps,
 } from "./pcloud-body.js"
 export { eventTone, isFolderEvent, type EventTone } from "./lib/event.js"
