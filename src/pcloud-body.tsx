@@ -1041,6 +1041,14 @@ export const PCloudBody = ({
     loadShares()
   }, [])
 
+  // Every tab except these two is loaded by switchTo, which only a keypress
+  // calls — so opening straight onto one through initialScreen showed it empty,
+  // having never fetched. Indistinguishable from a genuinely empty tab, which
+  // is why it survived the unit tests and only showed up in a screenshot.
+  useEffect(() => {
+    if (mode !== "files" && mode !== "shares") switchTo(mode)
+  }, [])
+
   const enterSelected = () => {
     const selected = items[cursor]
     if (selected?.isfolder) {
