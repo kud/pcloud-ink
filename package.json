@@ -1,6 +1,6 @@
 {
   "name": "@kud/pcloud-ink",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "Ink components for rendering pCloud domain objects — file lists, change history, account panels",
   "type": "module",
   "main": "dist/index.js",
