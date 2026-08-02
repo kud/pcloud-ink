@@ -35,7 +35,7 @@ export const ROW_CHROME = 4 + 1 + 1
 // A test holds the columns under that, because the row is truncate-end:
 // overrunning does not wrap, it silently eats the rightmost columns. First it
 // ate the date entirely, then it left "03 Nov…" behind.
-export const SHARE_COLUMNS = { id: 8, folder: 16, who: 22, rights: 5, date: 11 }
+export const SHARE_COLUMNS = { id: 8, folder: 15, who: 22, rights: 5, date: 12 }
 
 export const SHARE_ROW_WIDTH = Object.values(SHARE_COLUMNS).reduce(
   (total, width) => total + width,

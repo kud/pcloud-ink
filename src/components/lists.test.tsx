@@ -116,15 +116,28 @@ test("a share row fits the pane the browser gives it, chrome included", () => {
   expect(SHARE_ROW_WIDTH + ROW_CHROME).toBeLessThanOrEqual(NARROW_PANE)
 })
 
-test("every share column leaves a gutter for its longest value", () => {
-  expect(SHARE_COLUMNS.date).toBe(formatDate("Mon, 03 Nov 2025 10:00:00 +0000").length)
-  expect(SHARE_COLUMNS.rights).toBeGreaterThan(shareRights({ canread: true } as never).length)
-  expect(SHARE_COLUMNS.who).toBeGreaterThan("colleague@example.com".length)
-})
 
 // pCloud issues six-digit share ids. A column sized for the mock's four-digit
 // ones rendered a real id as "2253…" — the one value on the row you cannot
 // guess from context, since it is the argument remove-share takes.
 test("the id column holds a real six-digit share id", () => {
   expect(SHARE_COLUMNS.id).toBeGreaterThan("225308".length)
+})
+
+// fit() truncates when the text is not strictly shorter than the column, so a
+// column sized to exactly fit its longest value renders "03 Nov 20…". Every
+// column needs a gutter, not a snug fit — this has gone wrong four times.
+test("every share column is strictly wider than its longest value", () => {
+  const longest = {
+    id: "225308",
+    folder: "Documents/",
+    who: "colleague@example.com",
+    rights: shareRights({ canread: true, canmodify: true } as never),
+    date: formatDate("Mon, 03 Nov 2025 10:00:00 +0000"),
+  }
+  for (const [column, value] of Object.entries(longest)) {
+    expect(
+      SHARE_COLUMNS[column as keyof typeof SHARE_COLUMNS],
+    ).toBeGreaterThan(value.length)
+  }
 })
