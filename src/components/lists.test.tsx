@@ -2,7 +2,12 @@ import React from "react"
 import { test, expect } from "vitest"
 import { render } from "ink-testing-library"
 import { TrashList, trashId, deletedOn } from "./trash-list.js"
-import { SHARE_COLUMNS, SHARE_ROW_WIDTH, shareRights } from "./share-list.js"
+import {
+  ROW_CHROME,
+  SHARE_COLUMNS,
+  SHARE_ROW_WIDTH,
+  shareRights,
+} from "./share-list.js"
 import { formatDate } from "@kud/pcloud"
 import { PublinkList, publinkExpiry } from "./publink-list.js"
 import { RevisionList, byNewest } from "./revision-list.js"
@@ -105,12 +110,21 @@ test("RevisionList marks the newest, which is what revert usually means", () => 
 
 // The row is truncate-end: overrun does not wrap, it silently eats the right
 // hand columns. A screenshot of "rwc-…" is how we found that out.
-test("a share row fits the pane the browser gives it", () => {
-  expect(SHARE_ROW_WIDTH).toBeLessThanOrEqual(70)
+const NARROW_PANE = 69
+
+test("a share row fits the pane the browser gives it, chrome included", () => {
+  expect(SHARE_ROW_WIDTH + ROW_CHROME).toBeLessThanOrEqual(NARROW_PANE)
 })
 
 test("every share column leaves a gutter for its longest value", () => {
   expect(SHARE_COLUMNS.date).toBe(formatDate("Mon, 03 Nov 2025 10:00:00 +0000").length)
   expect(SHARE_COLUMNS.rights).toBeGreaterThan(shareRights({ canread: true } as never).length)
   expect(SHARE_COLUMNS.who).toBeGreaterThan("colleague@example.com".length)
+})
+
+// pCloud issues six-digit share ids. A column sized for the mock's four-digit
+// ones rendered a real id as "2253…" — the one value on the row you cannot
+// guess from context, since it is the argument remove-share takes.
+test("the id column holds a real six-digit share id", () => {
+  expect(SHARE_COLUMNS.id).toBeGreaterThan("225308".length)
 })

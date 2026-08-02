@@ -25,11 +25,17 @@ export const shareRights = (share: PCloudShareItem): string =>
     share.candelete ? "d" : "-",
   ].join("")
 
-// The list pane gets roughly half the terminal — about 72 columns on a wide
-// one — and the row has to end before that edge, not at it. A test holds these
-// under the budget, because the row is truncate-end: overrunning does not wrap,
-// it silently eats the rightmost columns. "rwc-…" is what that looks like.
-export const SHARE_COLUMNS = { id: 7, folder: 20, who: 24, rights: 6, date: 11 }
+// A row does not start at column zero, and forgetting that is what made this
+// wrong twice. SelectableRow prefixes a four-character marker slot ("  ❯ ") to
+// every row it wraps, and the browser puts the whole list inside paddingX={1}.
+// So the columns below get the pane's width less six, never its full width.
+export const ROW_CHROME = 4 + 1 + 1
+
+// The list pane is roughly half the terminal — about 69 columns on a wide one.
+// A test holds the columns under that, because the row is truncate-end:
+// overrunning does not wrap, it silently eats the rightmost columns. First it
+// ate the date entirely, then it left "03 Nov…" behind.
+export const SHARE_COLUMNS = { id: 8, folder: 16, who: 22, rights: 5, date: 11 }
 
 export const SHARE_ROW_WIDTH = Object.values(SHARE_COLUMNS).reduce(
   (total, width) => total + width,
