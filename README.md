@@ -1,12 +1,31 @@
-# @kud/pcloud-ink
+<div align="center">
 
-☁️ Ink components for rendering pCloud domain objects — file listings, change
-history, shares, sync health, and the assembled browser.
+<img src="assets/icon.svg" width="128" alt="pCloud Ink icon" />
 
-The presentation layer of the pCloud toolchain:
-[`@kud/pcloud`](https://github.com/kud/pcloud) provides the types, formatters and
-rewind engine, this package renders them, and
-[`@kud/pcloud-cli`](https://github.com/kud/pcloud-cli) consumes them.
+☁️
+
+# pCloud Ink
+
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![React](https://img.shields.io/badge/React-20232A?style=flat-square&logo=react&logoColor=61DAFB)
+![npm](https://img.shields.io/npm/v/%40kud%2Fpcloud-ink?style=flat-square&color=CB3837)
+![MIT](https://img.shields.io/badge/licence-MIT-22C55E?style=flat-square)
+
+**☁️ Ink components for rendering pCloud domain objects — file lists, change history, account panels**
+
+<a href="https://kud.io/projects/pcloud-ink">Website</a> · <a href="https://kud.io/projects/pcloud-ink/docs">Documentation</a>
+
+</div>
+
+## Features
+
+The presentation layer of the pCloud toolchain: [`@kud/pcloud`](https://github.com/kud/pcloud) provides the types, formatters and rewind engine, this package renders them — file listings, change history, shares, sync health, and the assembled browser — and [`@kud/pcloud-cli`](https://github.com/kud/pcloud-cli) consumes them.
+
+- **Presentation-only lists** — files, changes, shares, trash, public links, revisions and sync health; props in, no fetching, no input handling
+- **Controlled selection** — pass `selected` and `rows`, own the key handling yourself
+- **Assembled browser** — `PCloudBrowser` mounts the lists into six tabs as a full interactive client
+- **Host-provided extras** — the **Sync** and **Settings** tabs appear only when the host supplies a provider
+- **Never colour alone** — glyphs, labels and positional `rwcd` carry every state
 
 ## Install
 
@@ -24,13 +43,13 @@ same component composes into a one-shot CLI command or a pane in a larger
 dashboard.
 
 ```tsx
-import { render } from "ink"
-import { FileList, sortItems } from "@kud/pcloud-ink"
+import { render } from "ink";
+import { FileList, sortItems } from "@kud/pcloud-ink";
 
 const { unmount } = render(
   <FileList items={sortItems(contents)} rows={contents.length} />,
-)
-unmount()
+);
+unmount();
 ```
 
 ## Components
@@ -57,12 +76,12 @@ presentation-only component. It mounts the lists above into six tabs and owns
 its own navigation.
 
 ```tsx
-import { render } from "ink"
-import { PCloudBrowser } from "@kud/pcloud-ink"
+import { render } from "ink";
+import { PCloudBrowser } from "@kud/pcloud-ink";
 
 render(<PCloudBrowser onExit={() => process.exit(0)} api={client} />, {
   alternateScreen: true,
-})
+});
 ```
 
 | Prop       | Purpose                                                                   |
@@ -101,6 +120,24 @@ Every fixed-width column goes through `fit`, which truncates as well as pads —
 a value that exactly fills its column would otherwise weld itself to the next
 one, and `padEnd` alone never shortens anything.
 
+## Development
+
+```sh
+git clone https://github.com/kud/pcloud-ink.git
+cd pcloud-ink
+npm install
+npm run dev
+```
+
+| Script              | Purpose                        |
+| ------------------- | ------------------------------ |
+| `npm run build`     | Bundle to `dist/` with tsup    |
+| `npm run dev`       | Rebuild on change              |
+| `npm run typecheck` | Type-check with `tsc --noEmit` |
+| `npm test`          | Run the vitest suite           |
+
 ## Licence
 
 MIT © kud
+
+📚 **Full documentation → [pcloud-ink/docs](https://kud.io/projects/pcloud-ink/docs)**
